@@ -24,7 +24,17 @@ pub fn run() {
     init_logging();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "{} starting", config::APP_NAME);
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::app_info])
+        .setup(|app| {
+            use tauri::Manager;
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let db_path = dir.join(config::DB_FILE_NAME);
+            tracing::info!(path = %db_path.display(), "opening database");
+            let db = tauri::async_runtime::block_on(database::Database::open(&db_path))?;
+            app.manage(db);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![commands::app_info, commands::db_status])
         .run(tauri::generate_context!())
         .expect("error while running ProctorLAN");
 }

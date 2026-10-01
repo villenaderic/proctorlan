@@ -12,6 +12,8 @@ pub const MAX_STUDENTS: usize = 100;
 pub const SESSION_CODE_LENGTH: usize = 5;
 pub const DEFAULT_LOG_FILTER: &str = "info";
 pub const DB_FILE_NAME: &str = "proctorlan.db";
+pub const DB_MAX_CONNECTIONS: u32 = 5;
+pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Time after which a silent student is considered disconnected.
 pub fn disconnect_timeout() -> Duration {

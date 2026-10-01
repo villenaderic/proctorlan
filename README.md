@@ -2,7 +2,7 @@
 
 Offline classroom exam proctoring over a local network. The teacher's computer hosts; student computers join with a session code. No internet, no cloud, no telemetry.
 
-**Status:** Phase 1 of 13 — foundation only (see `docs/architecture.md`). Teacher/student features arrive in later phases.
+**Status:** Phase 2 of 13 — database layer done (see `docs/database.md`). Teacher/student features arrive in later phases.
 
 ## Requirements
 - Node.js 20+ and npm

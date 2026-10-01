@@ -1,10 +1,12 @@
 //! Tauri commands exposed to the React frontend.
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use crate::config::APP_NAME;
+use crate::database::Database;
 use crate::errors::{AppError, AppResult};
+use crate::models::Stats;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,4 +31,18 @@ pub fn app_info(app: AppHandle) -> AppResult<AppInfo> {
         arch: std::env::consts::ARCH,
         data_dir: dir.display().to_string(),
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbStatus {
+    pub ready: bool,
+    pub migrations_applied: i64,
+    pub stats: Stats,
+}
+
+/// Real read from SQLite: proves migrations ran and the database is reachable.
+#[tauri::command]
+pub async fn db_status(db: State<'_, Database>) -> AppResult<DbStatus> {
+    Ok(DbStatus { ready: true, migrations_applied: db.migrations_applied().await?, stats: db.stats().await? })
 }

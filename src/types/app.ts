@@ -20,5 +20,12 @@ export interface DbStats {
 export interface DbStatus {
   ready: boolean;
   migrationsApplied: number;
-  stats: DbStats;
+}
+
+/** Shape returned by the Rust `dashboard_stats` command. */
+export interface Stats {
+  exams: number;
+  activeSessions: number;
+  students: number;
+  completedAttempts: number;
 }

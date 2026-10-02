@@ -18,6 +18,8 @@ pub enum AppError {
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]
+    Unauthorized(String),
+    #[error("{0}")]
     Internal(String),
 }
 
@@ -48,7 +50,7 @@ impl Serialize for AppError {
             AppError::Io(_) => "A file system error occurred.".to_string(),
             AppError::Db(_) | AppError::Migrate(_) => "A database error occurred.".to_string(),
             AppError::Internal(_) => "An unexpected error occurred.".to_string(),
-            AppError::NotFound(m) | AppError::Conflict(m) | AppError::Validation(m) => m.clone(),
+            AppError::NotFound(m) | AppError::Conflict(m) | AppError::Validation(m) | AppError::Unauthorized(m) => m.clone(),
         };
         s.serialize_str(&msg)
     }

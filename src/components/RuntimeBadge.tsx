@@ -19,7 +19,7 @@ export function RuntimeBadge() {
   return (
     <p className="text-xs text-slate-500 dark:text-slate-400">
       v{info.version} · {info.os}/{info.arch} ·{" "}
-      {dbError ? "Database error" : db ? `Database ready (${db.stats.exams} exams, schema v${db.migrationsApplied})` : "Opening database…"}
+      {dbError ? "Database error" : db ? `Database ready (schema v${db.migrationsApplied})` : "Opening database…"}
     </p>
   );
 }

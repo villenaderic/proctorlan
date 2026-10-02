@@ -12,3 +12,12 @@ export const NETWORK_DEFAULTS = {
   reconnectIntervalMs: 3_000,
   sessionCodeLength: 5,
 } as const;
+
+/** Mirrors src-tauri/src/config.rs; the backend is the authoritative validator. */
+export const AUTH_LIMITS = {
+  minPasswordLength: 8,
+  maxPasswordLength: 128,
+  usernameMin: 3,
+  usernameMax: 32,
+  displayNameMax: 64,
+} as const;

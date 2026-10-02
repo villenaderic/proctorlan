@@ -12,6 +12,16 @@ pub const MAX_STUDENTS: usize = 100;
 pub const SESSION_CODE_LENGTH: usize = 5;
 pub const DEFAULT_LOG_FILTER: &str = "info";
 pub const DB_FILE_NAME: &str = "proctorlan.db";
+/// Teacher authentication limits (mirrored in src/config.ts for form validation).
+pub const MIN_PASSWORD_LEN: usize = 8;
+pub const MAX_PASSWORD_LEN: usize = 128;
+pub const USERNAME_MIN_LEN: usize = 3;
+pub const USERNAME_MAX_LEN: usize = 32;
+pub const DISPLAY_NAME_MAX_LEN: usize = 64;
+pub const MAX_FAILED_LOGINS: u32 = 5;
+pub const LOGIN_LOCKOUT: Duration = Duration::from_secs(60);
+/// Teacher is signed out after this long without any command.
+pub const TEACHER_IDLE_TIMEOUT: Duration = Duration::from_secs(8 * 60 * 60);
 pub const DB_MAX_CONNECTIONS: u32 = 5;
 pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

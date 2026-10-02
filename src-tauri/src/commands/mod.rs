@@ -1,5 +1,7 @@
 //! Tauri commands exposed to the React frontend.
 
+pub mod auth;
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -7,6 +9,7 @@ use crate::config::APP_NAME;
 use crate::database::Database;
 use crate::errors::{AppError, AppResult};
 use crate::models::Stats;
+use crate::services::auth_service::AuthService;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,11 +41,17 @@ pub fn app_info(app: AppHandle) -> AppResult<AppInfo> {
 pub struct DbStatus {
     pub ready: bool,
     pub migrations_applied: i64,
-    pub stats: Stats,
 }
 
-/// Real read from SQLite: proves migrations ran and the database is reachable.
+/// Public health check: proves migrations ran and the database is reachable. No exam data.
 #[tauri::command]
 pub async fn db_status(db: State<'_, Database>) -> AppResult<DbStatus> {
-    Ok(DbStatus { ready: true, migrations_applied: db.migrations_applied().await?, stats: db.stats().await? })
+    Ok(DbStatus { ready: true, migrations_applied: db.migrations_applied().await? })
+}
+
+/// Teacher-only dashboard numbers, read from SQLite.
+#[tauri::command]
+pub async fn dashboard_stats(auth: State<'_, AuthService>, db: State<'_, Database>) -> AppResult<Stats> {
+    auth.require_user().await?;
+    db.stats().await
 }

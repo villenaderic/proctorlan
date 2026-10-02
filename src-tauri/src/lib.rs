@@ -31,10 +31,21 @@ pub fn run() {
             let db_path = dir.join(config::DB_FILE_NAME);
             tracing::info!(path = %db_path.display(), "opening database");
             let db = tauri::async_runtime::block_on(database::Database::open(&db_path))?;
+            app.manage(services::auth_service::AuthService::new(db.clone()));
             app.manage(db);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::app_info, commands::db_status])
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::db_status,
+            commands::dashboard_stats,
+            commands::auth::auth_status,
+            commands::auth::setup_admin,
+            commands::auth::login,
+            commands::auth::logout,
+            commands::auth::change_password,
+            commands::auth::update_display_name,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ProctorLAN");
 }

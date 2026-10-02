@@ -90,14 +90,20 @@ impl Database {
             let own = choices.iter().filter(|c| c.question_id == q.id).cloned().collect();
             QuestionFull { question: q, choices: own }
         }).collect();
-        Ok(ExamFull { exam, questions })
+        let session_count = self.pool_session_count(id).await?;
+        Ok(ExamFull { exam, questions, session_count })
+    }
+
+    async fn pool_session_count(&self, id: &str) -> AppResult<i64> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM exam_sessions WHERE exam_id = ?").bind(id).fetch_one(&self.pool).await?)
     }
 
     pub async fn list_exams(&self) -> AppResult<Vec<ExamSummary>> {
         Ok(sqlx::query_as(
             "SELECT e.*,
                     (SELECT COUNT(*) FROM questions WHERE exam_id = e.id) AS question_count,
-                    (SELECT COALESCE(SUM(points), 0.0) FROM questions WHERE exam_id = e.id) AS total_points
+                    (SELECT COALESCE(SUM(points), 0.0) FROM questions WHERE exam_id = e.id) AS total_points,
+                    (SELECT COUNT(*) FROM exam_sessions WHERE exam_id = e.id) AS session_count
              FROM exams e ORDER BY e.updated_at DESC",
         ).fetch_all(&self.pool).await?)
     }

@@ -2,7 +2,7 @@
 
 Offline classroom exam proctoring over a local network. The teacher's computer hosts; student computers join with a session code. No internet, no cloud, no telemetry.
 
-**Status:** Phase 3 of 13 — authentication done (teacher setup, login, shell, settings). See `docs/security.md`.
+**Status:** Phase 4 of 13 — exam builder done (exams list, 4-step builder, preview). See `docs/teacher-guide.md`.
 
 ## Requirements
 - Node.js 20+ and npm

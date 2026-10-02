@@ -32,6 +32,7 @@ pub fn run() {
             tracing::info!(path = %db_path.display(), "opening database");
             let db = tauri::async_runtime::block_on(database::Database::open(&db_path))?;
             app.manage(services::auth_service::AuthService::new(db.clone()));
+            app.manage(services::exam_service::ExamService::new(db.clone()));
             app.manage(db);
             Ok(())
         })
@@ -45,6 +46,14 @@ pub fn run() {
             commands::auth::logout,
             commands::auth::change_password,
             commands::auth::update_display_name,
+            commands::exams::list_exams,
+            commands::exams::get_exam,
+            commands::exams::validate_exam,
+            commands::exams::create_exam,
+            commands::exams::update_exam,
+            commands::exams::set_exam_active,
+            commands::exams::duplicate_exam,
+            commands::exams::delete_exam,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ProctorLAN");

@@ -22,6 +22,14 @@ pub const MAX_FAILED_LOGINS: u32 = 5;
 pub const LOGIN_LOCKOUT: Duration = Duration::from_secs(60);
 /// Teacher is signed out after this long without any command.
 pub const TEACHER_IDLE_TIMEOUT: Duration = Duration::from_secs(8 * 60 * 60);
+/// Exam content limits (protect the database, the LAN payloads and the UI from absurd input).
+pub const MAX_QUESTIONS_PER_EXAM: usize = 500;
+pub const MAX_CHOICES_PER_QUESTION: usize = 10;
+pub const MAX_TITLE_LEN: usize = 200;
+pub const MAX_TEXT_LEN: usize = 5_000;
+pub const MAX_CHOICE_LEN: usize = 500;
+pub const MAX_POINTS: f64 = 1_000.0;
+pub const MAX_DURATION_MINUTES: i64 = 1_440;
 pub const DB_MAX_CONNECTIONS: u32 = 5;
 pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

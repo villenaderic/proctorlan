@@ -1,6 +1,7 @@
 //! Tauri commands exposed to the React frontend.
 
 pub mod auth;
+pub mod exams;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};

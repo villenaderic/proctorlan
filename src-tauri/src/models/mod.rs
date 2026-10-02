@@ -85,6 +85,7 @@ pub struct ExamSummary {
     pub exam: Exam,
     pub question_count: i64,
     pub total_points: f64,
+    pub session_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, FromRow)]
@@ -126,6 +127,8 @@ pub struct ExamFull {
     #[serde(flatten)]
     pub exam: Exam,
     pub questions: Vec<QuestionFull>,
+    /// Sessions that used this exam; when > 0 the exam is locked (cannot be edited or deleted).
+    pub session_count: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

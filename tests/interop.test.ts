@@ -1,0 +1,73 @@
+// @vitest-environment node
+/**
+ * Real interop: the TypeScript StudentClient against the real Rust LAN server.
+ * Skipped unless PROCTORLAN_INTEROP=1 (needs a compiled Rust toolchain):
+ *   PROCTORLAN_INTEROP=1 npx vitest run tests/interop.test.ts
+ */
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { StudentClient, type JoinedInfo } from "../src/features/student/client";
+
+const enabled = process.env.PROCTORLAN_INTEROP === "1";
+
+describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
+  let proc: ChildProcessWithoutNullStreams;
+  let lines: AsyncIterator<string>;
+  let info: { port: number; code: string };
+
+  const command = async (c: string) => { proc.stdin.write(c + "\n"); return JSON.parse((await lines.next()).value); };
+  const until = async (cond: () => boolean, ms = 5000) => {
+    const end = Date.now() + ms;
+    while (!cond()) { if (Date.now() > end) throw new Error("timed out"); await new Promise((r) => setTimeout(r, 20)); }
+  };
+
+  beforeAll(async () => {
+    proc = spawn("cargo", ["run", "--quiet", "--example", "dev_server"], { cwd: "src-tauri", env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: "0" } });
+    lines = createInterface({ input: proc.stdout })[Symbol.asyncIterator]();
+    info = JSON.parse((await lines.next()).value);
+  }, 600_000);
+  afterAll(() => { proc?.stdin.write("quit\n"); proc?.kill(); });
+
+  function connect(name: string, id: string, token: string | null = null) {
+    const log = { joined: [] as JoinedInfo[], messages: [] as string[], fatal: [] as any[], states: [] as string[] };
+    const client = new StudentClient(
+      { host: "127.0.0.1", port: info.port, sessionCode: info.code, studentName: name, studentId: id, token },
+      { onState: (s) => log.states.push(s), onJoined: (j) => log.joined.push(j), onMessage: (m) => log.messages.push(m.type), onFatal: (f) => log.fatal.push(f) },
+      { backoffMs: [100, 200] },
+    );
+    client.start();
+    return { client, log };
+  }
+
+  it("joins, receives the teacher's start, reconnects with its token, and is refused when impersonated", async () => {
+    const a = connect("Ana Reyes", "2024-001");
+    await until(() => a.log.joined.length === 1);
+    expect(a.log.joined[0]).toMatchObject({ studentName: "Ana Reyes", studentId: "2024-001", resumed: false, status: "WAITING" });
+    expect(a.log.joined[0].exam).toMatchObject({ title: "Dev Exam", questionCount: 1, durationMinutes: 30 });
+    expect(a.log.joined[0].token).toHaveLength(64);
+
+    const roster = await command("roster");
+    expect(roster).toHaveLength(1);
+    expect(roster[0]).toMatchObject({ name: "Ana Reyes", online: true });
+
+    await command("start");
+    await until(() => a.log.messages.includes("session_started"));
+
+    // Impostor with the same ID but no token is refused (fatal, no retry loop).
+    const imp = connect("Mallory", "2024-001");
+    await until(() => imp.log.fatal.length === 1);
+    expect(imp.log.fatal[0].code).toBe("already_joined");
+
+    // Ana's real client resumes the same attempt with her saved token.
+    a.client.stop();
+    const back = connect("Ana Reyes", "2024-001", a.log.joined[0].token);
+    await until(() => back.log.joined.length === 1);
+    expect(back.log.joined[0]).toMatchObject({ resumed: true, attemptId: a.log.joined[0].attemptId, status: "RUNNING" });
+    expect(back.log.joined[0].remainingSeconds).toBeGreaterThan(1700);
+
+    await command("end");
+    await until(() => back.log.messages.includes("session_ended"));
+    back.client.stop();
+  }, 30_000);
+});

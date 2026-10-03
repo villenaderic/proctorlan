@@ -23,6 +23,7 @@ export interface SessionSnapshot extends SessionRow {
   passingScore: number;
   joined: number;
   connected: number;
+  online: number;
   submitted: number;
   remainingSeconds: number | null;
   serverTime: string;
@@ -45,4 +46,16 @@ export interface NetworkInfo {
   configuredPort: number;
   defaultPort: number;
   joinAddress: string | null;
+}
+
+export type AttemptStatus = "JOINED" | "IN_PROGRESS" | "SUBMITTED" | "AUTO_SUBMITTED";
+
+export interface RosterRow {
+  attemptId: string;
+  studentNumber: string;
+  name: string;
+  status: AttemptStatus;
+  joinedAt: string;
+  submittedAt: string | null;
+  online: boolean;
 }

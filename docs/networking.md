@@ -25,8 +25,8 @@ Bodies over 256 KB are rejected. 10 wrong codes in 60 s from one address → HTT
 ## WebSocket protocol
 Envelope: `{ id, type, sessionId, timestamp, payload }`. Text frames only, max 64 KB.
 
-Client → server: `hello {sessionCode}` (must be first, within 10 s), `heartbeat`.
-Server → client: `welcome`, `heartbeat_ack`, `timer_sync` (every 5 s), `session_started|paused|resumed|ended`, `error {code,message}`.
+Client → server: `hello {sessionCode}` (must be first, within 10 s), `join {studentName, studentId, token?}`, `heartbeat`.
+Server → client: `welcome`, `joined`, `removed`, `heartbeat_ack`, `timer_sync` (every 5 s), `session_started|paused|resumed|ended`, `error {code,message}`.
 
 - Replies carry `payload.inReplyTo`.
 - Malformed/unknown messages get an `error` and the connection stays up; oversize frames close it.
@@ -34,8 +34,22 @@ Server → client: `welcome`, `heartbeat_ack`, `timer_sync` (every 5 s), `sessio
 - Timer values are computed by the server (`endsAt`, `remainingSeconds`, `serverTime`); clients only display them.
 - Answer keys never appear in any frame (tested).
 
-Student name/ID join, answers, submit and proctor events are added in Phases 6–9.
+## Joining (Phase 6)
+- `join` creates one attempt per (session, student ID). IDs are trimmed and upper-cased, so `a1` and `A1` are the same student.
+- The reply `joined` carries a 64-character bearer **token, once**. Only its SHA-256 hash is stored.
+- Reconnecting sends the same `join` with that token and resumes the same attempt (`resumed: true`, no new token).
+- A second person using an ID that already joined, or a wrong token, gets `already_joined` and nothing changes (not even the stored name).
+- Simultaneous joins for one ID: exactly one wins.
+- The teacher can **Remove** a student who has not started (status JOINED): the socket gets `removed` and closes, and the student can join again fresh. Students who started cannot be removed.
+- `joined` includes the exam title, description, instructions, duration and question count, but **no questions or answers**.
+- Students can join while the session is WAITING, RUNNING or PAUSED, never after it ENDS.
+
+Answers, submit and proctor events are added in Phases 7–9.
 
 ## Not verified here
 Tests run over real sockets on 127.0.0.1. **Not yet verified:** a second physical machine on a real LAN,
 mDNS on real networks, and Windows Firewall prompts (first run may ask to allow ProctorLAN on private networks — allow it).
+
+## Verified in Phase 6
+- The TypeScript student client was run against the real Rust server (`PROCTORLAN_INTEROP=1 npx vitest run tests/interop.test.ts`, which spawns `cargo run --example dev_server`): join, session_started push, impostor refusal, rejoin by token, session_ended.
+- **Not verified:** the student screens visually, and the Tauri WebView on Windows/macOS/Linux opening `ws://` to another machine (the CSP allows it; needs a two-computer test).

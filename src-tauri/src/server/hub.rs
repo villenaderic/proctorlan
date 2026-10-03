@@ -16,6 +16,8 @@ const MAX_FAILURES_PER_WINDOW: u32 = 10;
 pub struct Hub {
     events: broadcast::Sender<Envelope>,
     clients: Mutex<HashMap<String, usize>>,
+    /// attempt id -> (session id, live sockets). Only students who completed `join` appear here.
+    online: Mutex<HashMap<String, (String, usize)>>,
     failures: Mutex<HashMap<IpAddr, (u32, Instant)>>,
 }
 
@@ -37,9 +39,27 @@ impl Drop for ConnGuard {
     }
 }
 
+/// Marks one student as online while a joined socket exists; dropping it clears the mark.
+pub struct OnlineGuard {
+    hub: Arc<Hub>,
+    attempt_id: String,
+}
+
+impl Drop for OnlineGuard {
+    fn drop(&mut self) {
+        let mut g = self.hub.online.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, n)) = g.get_mut(&self.attempt_id) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                g.remove(&self.attempt_id);
+            }
+        }
+    }
+}
+
 impl Hub {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { events: broadcast::channel(256).0, clients: Mutex::default(), failures: Mutex::default() })
+        Arc::new(Self { events: broadcast::channel(256).0, clients: Mutex::default(), online: Mutex::default(), failures: Mutex::default() })
     }
 
     pub fn connected(&self, session_id: &str) -> usize {
@@ -55,6 +75,20 @@ impl Hub {
         }
         *n += 1;
         Some(ConnGuard { hub: self.clone(), session_id: session_id.to_string() })
+    }
+
+    pub fn mark_online(self: &Arc<Self>, attempt_id: &str, session_id: &str) -> OnlineGuard {
+        let mut g = self.online.lock().unwrap_or_else(|e| e.into_inner());
+        g.entry(attempt_id.to_string()).or_insert_with(|| (session_id.to_string(), 0)).1 += 1;
+        OnlineGuard { hub: self.clone(), attempt_id: attempt_id.to_string() }
+    }
+
+    pub fn is_online(&self, attempt_id: &str) -> bool {
+        self.online.lock().unwrap_or_else(|e| e.into_inner()).contains_key(attempt_id)
+    }
+
+    pub fn online_in_session(&self, session_id: &str) -> usize {
+        self.online.lock().unwrap_or_else(|e| e.into_inner()).values().filter(|(s, _)| s == session_id).count()
     }
 
     pub fn publish(&self, env: Envelope) {
@@ -103,6 +137,21 @@ mod tests {
         drop(b);
         assert_eq!(hub.connected("s1"), 0);
         assert_eq!(hub.connected("other"), 0);
+    }
+
+    #[test]
+    fn online_marks_survive_until_the_last_socket_closes() {
+        let hub = Hub::new();
+        let a = hub.mark_online("att1", "s1");
+        let b = hub.mark_online("att1", "s1"); // reconnect overlapping the dying socket
+        let _c = hub.mark_online("att2", "s1");
+        assert_eq!(hub.online_in_session("s1"), 2);
+        drop(a);
+        assert!(hub.is_online("att1"));
+        drop(b);
+        assert!(!hub.is_online("att1"));
+        assert_eq!(hub.online_in_session("s1"), 1);
+        assert_eq!(hub.online_in_session("other"), 0);
     }
 
     #[test]

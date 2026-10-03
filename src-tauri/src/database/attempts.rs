@@ -1,6 +1,6 @@
 use super::{ids::*, Database};
 use crate::errors::{AppError, AppResult};
-use crate::models::{Answer, Attempt, AttemptStatus, Student};
+use crate::models::{Answer, Attempt, AttemptStatus, RosterRow, Student};
 
 impl Database {
     /// Creates the student or refreshes the display name for an existing student number.
@@ -88,5 +88,29 @@ impl Database {
 
     pub async fn count_submitted_in_session(&self, session_id: &str) -> AppResult<i64> {
         Ok(sqlx::query_scalar("SELECT COUNT(*) FROM attempts WHERE session_id = ? AND status IN ('SUBMITTED','AUTO_SUBMITTED')").bind(session_id).fetch_one(&self.pool).await?)
+    }
+
+    pub async fn get_student(&self, id: &str) -> AppResult<Student> {
+        sqlx::query_as("SELECT * FROM students WHERE id = ?").bind(id).fetch_optional(&self.pool).await?
+            .ok_or_else(|| AppError::NotFound("Student not found.".into()))
+    }
+
+    pub async fn list_roster(&self, session_id: &str) -> AppResult<Vec<RosterRow>> {
+        Ok(sqlx::query_as(
+            "SELECT a.id AS attempt_id, s.student_number, s.name, a.status, a.created_at AS joined_at, a.submitted_at
+             FROM attempts a JOIN students s ON s.id = a.student_id
+             WHERE a.session_id = ? ORDER BY a.created_at, s.name",
+        ).bind(session_id).fetch_all(&self.pool).await?)
+    }
+
+    /// Removes an attempt that has done no work yet (still JOINED) so the student can join again.
+    /// Returns the session id it belonged to, or Conflict if the student has already started.
+    pub async fn remove_unstarted_attempt(&self, attempt_id: &str) -> AppResult<String> {
+        let attempt = self.get_attempt(attempt_id).await?;
+        let res = sqlx::query("DELETE FROM attempts WHERE id = ? AND status = 'JOINED'").bind(attempt_id).execute(&self.pool).await?;
+        if res.rows_affected() == 0 {
+            return Err(AppError::Conflict("This student has already started the exam and cannot be removed.".into()));
+        }
+        Ok(attempt.session_id)
     }
 }

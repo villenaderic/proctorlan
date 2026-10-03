@@ -11,7 +11,9 @@ use tokio::time::{interval, timeout, Instant};
 
 use crate::config;
 use crate::models::ExamSession;
+use crate::server::hub::OnlineGuard;
 use crate::server::AppState;
+use crate::services::join_service::{self, JoinError};
 use crate::services::timer;
 use crate::websocket::protocol::{client, parse_frame, server as msg, Envelope};
 
@@ -119,6 +121,8 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
     sync.tick().await; // first tick fires immediately; welcome already carried the time
     let idle = config::disconnect_timeout();
     let mut last_heard = Instant::now();
+    // Set once this connection has joined as a student; the guard marks them online.
+    let mut joined: Option<(String, OnlineGuard)> = None;
 
     loop {
         let deadline = last_heard + idle;
@@ -146,6 +150,10 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                         let ack = Envelope::reply(msg::HEARTBEAT_ACK, &env, Some(&session.id), json!({ "serverTime": timer::format(Utc::now()) }));
                         if !send(&mut socket, &ack).await { break; }
                     }
+                    client::JOIN => {
+                        let reply = handle_join(&st, &session, &env, &mut joined).await;
+                        if !send(&mut socket, &reply).await { break; }
+                    }
                     other => {
                         let e = Envelope::reply(msg::ERROR, &env, Some(&session.id), json!({ "code": "unknown_type", "message": format!("Unknown message type '{}'.", other.chars().take(32).collect::<String>()) }));
                         if !send(&mut socket, &e).await { break; }
@@ -153,6 +161,14 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                 }
             }
             ev = events.recv() => match ev {
+                Ok(e) if e.kind == msg::REMOVED && e.session_id.as_deref() == Some(session.id.as_str()) => {
+                    // Only the removed student's own sockets are told; everyone else ignores it.
+                    if joined.as_ref().is_some_and(|(id, _)| e.payload["attemptId"].as_str() == Some(id.as_str())) {
+                        let _ = send(&mut socket, &e).await;
+                        close_with(&mut socket, CLOSE_POLICY, "removed").await;
+                        break;
+                    }
+                }
                 Ok(e) if e.session_id.as_deref() == Some(session.id.as_str()) => {
                     let ended = e.kind == msg::SESSION_ENDED;
                     if !send(&mut socket, &e).await { break; }
@@ -182,4 +198,48 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
         }
     }
     tracing::info!(session_id = %session.id, %ip, "client disconnected");
+}
+
+/// Handles `join {studentName, studentId, token?}`. Never reveals questions or answers.
+async fn handle_join(st: &AppState, session: &ExamSession, env: &Envelope, joined: &mut Option<(String, OnlineGuard)>) -> Envelope {
+    let err = |e: JoinError| Envelope::reply(msg::ERROR, env, Some(&session.id), json!({ "code": e.code(), "message": e.message() }));
+    if joined.is_some() {
+        return err(JoinError::Invalid("This connection has already joined.".into()));
+    }
+    let text = |k: &str| env.payload.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let token = env.payload.get("token").and_then(|v| v.as_str()).filter(|t| !t.is_empty() && t.len() <= 128);
+
+    // Re-read the session: it may have ended since this socket said hello.
+    let current = match st.db.get_session(&session.id).await {
+        Ok(s) => s,
+        Err(_) => return err(JoinError::Internal),
+    };
+    let outcome = match join_service::join(&st.db, &current, &text("studentName"), &text("studentId"), token).await {
+        Ok(o) => o,
+        Err(e) => return err(e),
+    };
+    let exam = match st.db.get_exam_full(&current.exam_id).await {
+        Ok(e) => e,
+        Err(_) => return err(JoinError::Internal),
+    };
+    *joined = Some((outcome.attempt.id.clone(), st.hub.mark_online(&outcome.attempt.id, &session.id)));
+
+    let mut payload = timer_payload(&current);
+    if let Some(o) = payload.as_object_mut() {
+        o.insert("attemptId".into(), json!(outcome.attempt.id));
+        o.insert("resumed".into(), json!(outcome.new_token.is_none()));
+        o.insert("token".into(), json!(outcome.new_token));
+        o.insert("studentName".into(), json!(outcome.student.name));
+        o.insert("studentId".into(), json!(outcome.student.student_number));
+        o.insert("attemptStatus".into(), json!(outcome.attempt.status));
+        o.insert("exam".into(), json!({
+            "title": exam.exam.title,
+            "description": exam.exam.description,
+            "instructions": exam.exam.instructions,
+            "durationMinutes": exam.exam.duration_minutes,
+            "questionCount": exam.questions.len(),
+        }));
+    }
+    tracing::info!(session_id = %session.id, attempt_id = %outcome.attempt.id, resumed = outcome.new_token.is_none(), "student joined");
+    Envelope::reply(msg::JOINED, env, Some(&session.id), payload)
 }

@@ -346,3 +346,185 @@ async fn network_settings_are_validated_and_locked_during_an_open_session() {
     // Nothing was saved by the refused change.
     assert_eq!(h.db.get_setting("network.port").await.unwrap(), None);
 }
+
+// ---------------------------------------------------------------- Phase 6: student join
+
+impl Ws {
+    async fn join(&mut self, name: &str, id: &str, token: Option<&str>) -> Value {
+        self.send(json!({ "id": "j1", "type": "join", "payload": { "studentName": name, "studentId": id, "token": token } })).await;
+        self.recv().await.expect("server closed during join")
+    }
+}
+
+async fn joined_socket(h: &Harness, code: &str, name: &str, id: &str) -> (Ws, Value) {
+    let mut ws = h.ws().await;
+    ws.hello(code).await.unwrap();
+    let j = ws.join(name, id, None).await;
+    (ws, j)
+}
+
+#[tokio::test]
+async fn join_creates_an_attempt_and_returns_a_token_and_exam_info_but_no_questions() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let (_ws, j) = joined_socket(&h, &s.row.session.session_code, "  Ana   Reyes ", "2024-001a").await;
+    assert_eq!(j["type"], "joined", "{j}");
+    let p = &j["payload"];
+    assert_eq!(p["studentName"], "Ana Reyes");
+    assert_eq!(p["studentId"], "2024-001A");
+    assert_eq!(p["resumed"], false);
+    assert_eq!(p["token"].as_str().unwrap().len(), 64);
+    assert_eq!(p["exam"]["title"], "LAN Exam");
+    assert_eq!(p["exam"]["questionCount"], 1);
+    assert_eq!(p["exam"]["durationMinutes"], 30);
+    let dump = j.to_string();
+    assert!(!dump.contains("Pick one") && !dump.contains("isCorrect") && !dump.contains("questions"), "no question content before the exam starts");
+
+    // Only a hash is stored, never the token.
+    let stored: String = sqlx::query_scalar("SELECT token_hash FROM attempts").fetch_one(h.db.pool()).await.unwrap();
+    assert_ne!(stored, p["token"].as_str().unwrap());
+    assert_eq!(stored.len(), 64);
+}
+
+#[tokio::test]
+async fn roster_tracks_who_is_online() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let id = s.row.session.id.clone();
+    let (ws, _) = joined_socket(&h, &s.row.session.session_code, "Ana Reyes", "A1").await;
+    let (_ws2, _) = joined_socket(&h, &s.row.session.session_code, "Ben Cruz", "B2").await;
+    let roster = h.sessions.roster(&id).await.unwrap();
+    assert_eq!(roster.len(), 2);
+    assert!(roster.iter().all(|r| r.online && r.status == AttemptStatus::Joined));
+    assert_eq!(h.sessions.snapshot(&id).await.unwrap().online, 2);
+    drop(ws);
+    for _ in 0..50 {
+        if h.sessions.snapshot(&id).await.unwrap().online == 1 { break; }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let roster = h.sessions.roster(&id).await.unwrap();
+    assert_eq!(roster.iter().filter(|r| r.online).count(), 1);
+    assert!(!roster.iter().find(|r| r.name == "Ana Reyes").unwrap().online, "a dropped student is offline but stays on the roster");
+    assert_eq!(h.sessions.snapshot(&id).await.unwrap().joined, 2);
+}
+
+#[tokio::test]
+async fn same_student_id_cannot_be_claimed_without_the_token() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let code = s.row.session.session_code.clone();
+    let (ws, first) = joined_socket(&h, &code, "Ana Reyes", "A1").await;
+    let token = first["payload"]["token"].as_str().unwrap().to_string();
+    let attempt = first["payload"]["attemptId"].as_str().unwrap().to_string();
+    drop(ws);
+
+    // An impostor (or a lost token) is refused and nothing changes.
+    let mut imp = h.ws().await;
+    imp.hello(&code).await.unwrap();
+    assert_eq!(imp.join("Someone Else", "a1", None).await["payload"]["code"], "already_joined");
+    assert_eq!(imp.join("Someone Else", "A1", Some("wrong-token")).await["payload"]["code"], "already_joined");
+    let name: String = sqlx::query_scalar("SELECT name FROM students WHERE student_number='A1'").fetch_one(h.db.pool()).await.unwrap();
+    assert_eq!(name, "Ana Reyes", "a refused join must not rename the student");
+
+    // The real student resumes the same attempt with the saved token.
+    let mut back = h.ws().await;
+    back.hello(&code).await.unwrap();
+    let again = back.join("Ana Reyes", "A1", Some(&token)).await;
+    assert_eq!(again["type"], "joined");
+    assert_eq!(again["payload"]["resumed"], true);
+    assert_eq!(again["payload"]["attemptId"], attempt);
+    assert!(again["payload"]["token"].is_null(), "a token is only issued once");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attempts").fetch_one(h.db.pool()).await.unwrap();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn simultaneous_joins_for_one_student_id_create_one_attempt() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let code = s.row.session.session_code.clone();
+    let mut a = h.ws().await;
+    let mut b = h.ws().await;
+    a.hello(&code).await.unwrap();
+    b.hello(&code).await.unwrap();
+    let (ra, rb) = tokio::join!(a.join("Ana", "Z9", None), b.join("Ana", "Z9", None));
+    let kinds = [ra["type"].as_str().unwrap(), rb["type"].as_str().unwrap()];
+    assert_eq!(kinds.iter().filter(|k| **k == "joined").count(), 1, "{ra} {rb}");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attempts").fetch_one(h.db.pool()).await.unwrap();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn bad_identities_and_double_joins_get_clear_errors() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let mut ws = h.ws().await;
+    ws.hello(&s.row.session.session_code).await.unwrap();
+    for (name, id) in [("", "A1"), ("Ana", ""), ("Ana", "bad id!"), ("Ana", "'; DROP TABLE students;--")] {
+        let r = ws.join(name, id, None).await;
+        assert_eq!(r["payload"]["code"], "invalid_identity", "{name:?} {id:?}");
+        assert!(r["payload"]["message"].as_str().unwrap().len() > 5);
+    }
+    assert_eq!(ws.join("Ana", "A1", None).await["type"], "joined");
+    assert_eq!(ws.join("Ana", "A2", None).await["payload"]["code"], "invalid_identity", "one join per connection");
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attempts").fetch_one(h.db.pool()).await.unwrap();
+    assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn joining_is_refused_once_the_session_has_ended() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let mut ws = h.ws().await;
+    ws.hello(&s.row.session.session_code).await.unwrap();
+    h.sessions.act(&h.user, &s.row.session.id, SessionAction::End).await.unwrap();
+    assert_eq!(ws.recv().await.unwrap()["type"], "session_ended");
+    assert_eq!(ws.join("Ana", "A1", None).await["payload"]["code"], "session_closed");
+}
+
+#[tokio::test]
+async fn students_can_join_while_the_exam_is_running_or_paused() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let id = s.row.session.id.clone();
+    h.sessions.act(&h.user, &id, SessionAction::Start).await.unwrap();
+    let (_a, j) = joined_socket(&h, &s.row.session.session_code, "Late Larry", "L1").await;
+    assert_eq!(j["payload"]["status"], "RUNNING");
+    assert!(j["payload"]["remainingSeconds"].as_i64().unwrap() > 1700);
+    h.sessions.act(&h.user, &id, SessionAction::Pause).await.unwrap();
+    let (_b, j) = joined_socket(&h, &s.row.session.session_code, "Paused Pat", "P1").await;
+    assert_eq!(j["payload"]["status"], "PAUSED");
+}
+
+#[tokio::test]
+async fn teacher_can_remove_an_unstarted_student_who_is_then_kicked_and_can_rejoin() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let code = s.row.session.session_code.clone();
+    let (mut ws, j) = joined_socket(&h, &code, "Ana Reyes", "A1").await;
+    let attempt = j["payload"]["attemptId"].as_str().unwrap().to_string();
+    let (mut bystander, _) = joined_socket(&h, &code, "Ben Cruz", "B2").await;
+
+    h.sessions.remove_student(&h.user, &attempt).await.unwrap();
+    assert_eq!(ws.recv().await.unwrap()["type"], "removed");
+    assert!(ws.recv().await.is_none(), "removed student's socket is closed");
+    // Others are untouched.
+    bystander.send(json!({ "type": "heartbeat" })).await;
+    assert_eq!(bystander.recv().await.unwrap()["type"], "heartbeat_ack");
+
+    let (_ws2, j2) = joined_socket(&h, &code, "Ana Reyes", "A1").await;
+    assert_eq!(j2["payload"]["resumed"], false, "a fresh attempt is created");
+    assert_eq!(h.sessions.roster(&s.row.session.id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_student_who_has_started_cannot_be_removed() {
+    let h = harness().await;
+    let s = h.open_session().await;
+    let (_ws, j) = joined_socket(&h, &s.row.session.session_code, "Ana", "A1").await;
+    let attempt = j["payload"]["attemptId"].as_str().unwrap().to_string();
+    h.db.set_attempt_status(&attempt, AttemptStatus::InProgress).await.unwrap();
+    let err = h.sessions.remove_student(&h.user, &attempt).await.unwrap_err();
+    assert!(matches!(&err, AppError::Conflict(m) if m.contains("already started")), "{err}");
+    assert_eq!(h.sessions.roster(&s.row.session.id).await.unwrap().len(), 1);
+}

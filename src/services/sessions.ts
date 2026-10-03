@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { NetworkInfo, SessionAction, SessionRow, SessionSnapshot } from "@/types/session";
+import type { NetworkInfo, RosterRow, SessionAction, SessionRow, SessionSnapshot } from "@/types/session";
 
 export const sessionsApi = {
   list: () => invoke<SessionRow[]>("list_sessions"),
   snapshot: (id: string) => invoke<SessionSnapshot>("get_session_snapshot", { id }),
   create: (examId: string) => invoke<SessionSnapshot>("create_session", { examId }),
+  roster: (id: string) => invoke<RosterRow[]>("list_session_roster", { id }),
+  removeStudent: (attemptId: string) => invoke<void>("remove_student", { attemptId }),
   act: (id: string, action: SessionAction) => invoke<SessionSnapshot>("session_action", { id, action }),
 };
 

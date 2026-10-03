@@ -1,4 +1,4 @@
-import { Pause, Play, Square, Users } from "lucide-react";
+import { Pause, Play, Square, UserMinus, Users, Wifi, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { isSessionExpired, toMessage } from "@/services/auth";
 import { sessionsApi } from "@/services/sessions";
 import { refreshAuth } from "@/stores/auth";
-import type { SessionAction, SessionSnapshot } from "@/types/session";
+import type { RosterRow, SessionAction, SessionSnapshot } from "@/types/session";
 import { formatClock } from "@/utils/format";
 import { STATUS_LABEL, allowedActions, displayRemaining } from "@/utils/sessionClock";
 
@@ -17,6 +17,8 @@ const POLL_MS = 2000;
 export function SessionLivePage() {
   const { id = "" } = useParams();
   const [snap, setSnap] = useState<SessionSnapshot | null>(null);
+  const [roster, setRoster] = useState<RosterRow[]>([]);
+  const [toRemove, setToRemove] = useState<RosterRow | null>(null);
   const [fetchedAt, setFetchedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +41,10 @@ export function SessionLivePage() {
 
   useEffect(() => {
     alive.current = true;
-    const load = () => sessionsApi.snapshot(id).then(apply).catch(fail);
+    const load = () => {
+      sessionsApi.snapshot(id).then(apply).catch(fail);
+      sessionsApi.roster(id).then((r) => alive.current && setRoster(r)).catch(fail);
+    };
     load();
     const poll = setInterval(load, POLL_MS);
     const tick = setInterval(() => setNow(Date.now()), 1000);
@@ -88,7 +93,7 @@ export function SessionLivePage() {
       )}
 
       <div className="grid gap-4 sm:grid-cols-4">
-        <Stat label="Connected now" value={snap.connected} icon />
+        <Stat label="Online now" value={snap.online} icon />
         <Stat label="Joined" value={snap.joined} />
         <Stat label="Submitted" value={snap.submitted} />
         <Card className="p-4">
@@ -107,9 +112,49 @@ export function SessionLivePage() {
         {can.end && <Button variant="outline" disabled={busy} onClick={() => setConfirmEnd(true)}><Square className="h-4 w-4" aria-hidden /> End session</Button>}
       </div>
 
+      <Card className="overflow-hidden">
+        <h2 className="border-b border-slate-200 px-4 py-3 font-medium dark:border-slate-700">Students ({roster.length})</h2>
+        {roster.length === 0 ? (
+          <p className="p-4 text-sm text-slate-600 dark:text-slate-300">No one has joined yet. Share the code and address above.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-navy-800 dark:text-slate-300">
+              <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Student ID</th><th className="px-4 py-2">Connection</th><th className="px-4 py-2">Progress</th><th className="px-4 py-2" /></tr>
+            </thead>
+            <tbody>
+              {roster.map((r) => (
+                <tr key={r.attemptId} className="border-t border-slate-200 dark:border-slate-700">
+                  <td className="px-4 py-2 font-medium">{r.name}</td>
+                  <td className="px-4 py-2 font-mono">{r.studentNumber}</td>
+                  <td className="px-4 py-2">
+                    <Badge tone={r.online ? "green" : "amber"}>{r.online ? <Wifi className="h-3 w-3" aria-hidden /> : <WifiOff className="h-3 w-3" aria-hidden />}{r.online ? "Online" : "Disconnected"}</Badge>
+                  </td>
+                  <td className="px-4 py-2">{r.status === "JOINED" ? "Joined" : r.status === "IN_PROGRESS" ? "In progress" : "Submitted"}</td>
+                  <td className="px-4 py-2 text-right">
+                    {r.status === "JOINED" && !ended && (
+                      <Button size="sm" variant="outline" onClick={() => setToRemove(r)} aria-label={`Remove ${r.name}`}><UserMinus className="h-3.5 w-3.5" aria-hidden /> Remove</Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
       <p className="text-sm text-slate-600 dark:text-slate-300">
         {snap.questionCount} questions · passing score {snap.passingScore}%. Student join, answers and live proctoring arrive in the next phases.
       </p>
+
+      <ConfirmDialog open={!!toRemove} danger title={`Remove ${toRemove?.name ?? "student"}?`} confirmLabel="Remove"
+        onCancel={() => setToRemove(null)}
+        onConfirm={() => {
+          const r = toRemove;
+          setToRemove(null);
+          if (r) sessionsApi.removeStudent(r.attemptId).then(() => sessionsApi.roster(id).then(setRoster)).catch(fail);
+        }}>
+        They are disconnected from this session and can join again with their student ID. Only students who have not started the exam can be removed.
+      </ConfirmDialog>
 
       <ConfirmDialog open={confirmEnd} danger title="End this session?" confirmLabel="End session"
         onCancel={() => setConfirmEnd(false)} onConfirm={() => { setConfirmEnd(false); act("end"); }}>

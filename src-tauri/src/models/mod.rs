@@ -302,3 +302,17 @@ mod tests {
         assert!(Waiting.accepts_students() && !Created.accepts_students() && !Ended.accepts_students());
     }
 }
+
+/// One row of the teacher's live roster (online flag is filled in from the connection hub).
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct RosterRow {
+    pub attempt_id: String,
+    pub student_number: String,
+    pub name: String,
+    pub status: AttemptStatus,
+    pub joined_at: String,
+    pub submitted_at: Option<String>,
+    #[sqlx(skip)]
+    pub online: bool,
+}

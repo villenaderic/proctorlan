@@ -1,6 +1,6 @@
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { WelcomePage } from "@/pages/WelcomePage";
-import { ComingSoonPage } from "@/pages/ComingSoonPage";
+import { StudentPage } from "@/features/student/StudentJoinPage";
 import { TeacherGate } from "@/pages/teacher/TeacherGate";
 import { DashboardPage } from "@/pages/teacher/DashboardPage";
 import { SettingsPage } from "@/pages/teacher/SettingsPage";
@@ -30,7 +30,7 @@ export default function App() {
           <Route path="backups" element={<SectionPlaceholder title="Backups" phase="Phase 11 (Backup/Export)" />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
-        <Route path="/student" element={<ComingSoonPage title="Join an exam" phase="Phase 6 (Student Client)" />} />
+        <Route path="/student" element={<StudentPage />} />
         <Route path="*" element={<WelcomePage />} />
       </Routes>
     </HashRouter>

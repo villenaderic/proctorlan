@@ -1,6 +1,6 @@
 //! Wire protocol. Every frame is a JSON envelope:
 //! `{ "id", "type", "sessionId", "timestamp", "payload" }`.
-//! Phase 5 implements: hello/welcome, heartbeat/heartbeat_ack, timer_sync, session_* broadcasts, error.
+//! Phase 5 implements: hello/welcome; Phase 6 adds join/joined/removed, heartbeat/heartbeat_ack, timer_sync, session_* broadcasts, error.
 //! Student answer/submit/proctor messages are added in Phases 6–9 as new `type` values.
 
 use serde::{Deserialize, Serialize};
@@ -27,11 +27,14 @@ pub struct Envelope {
 pub mod client {
     pub const HELLO: &str = "hello";
     pub const HEARTBEAT: &str = "heartbeat";
+    pub const JOIN: &str = "join";
 }
 
 /// Message types the server sends.
 pub mod server {
     pub const WELCOME: &str = "welcome";
+    pub const JOINED: &str = "joined";
+    pub const REMOVED: &str = "removed";
     pub const HEARTBEAT_ACK: &str = "heartbeat_ack";
     pub const TIMER_SYNC: &str = "timer_sync";
     pub const SESSION_WAITING: &str = "session_waiting";

@@ -35,6 +35,8 @@ pub struct SessionSnapshot {
     pub joined: i64,
     /// Students with a live WebSocket right now.
     pub connected: usize,
+    /// Joined students with a live connection (what the teacher cares about).
+    pub online: usize,
     pub submitted: i64,
     pub remaining_seconds: Option<i64>,
     pub server_time: String,
@@ -136,10 +138,27 @@ impl SessionService {
             passing_score: exam.exam.passing_score,
             joined: self.db.count_attempts_in_session(id).await?,
             connected: self.hub.connected(id),
+            online: self.hub.online_in_session(id),
             submitted: self.db.count_submitted_in_session(id).await?,
             remaining_seconds: remaining,
             server_time: timer::format(now),
             row,
         })
+    }
+
+    pub async fn roster(&self, id: &str) -> AppResult<Vec<RosterRow>> {
+        let mut rows = self.db.list_roster(id).await?;
+        for r in &mut rows {
+            r.online = self.hub.is_online(&r.attempt_id);
+        }
+        Ok(rows)
+    }
+
+    /// Lets a student who has not started yet join again (typo, lost token, new device).
+    pub async fn remove_student(&self, user: &User, attempt_id: &str) -> AppResult<()> {
+        let session_id = self.db.remove_unstarted_attempt(attempt_id).await?;
+        self.db.audit(Some(&user.id), "student.remove", "attempt", Some(attempt_id), None).await?;
+        self.hub.publish(Envelope::new(msg::REMOVED, Some(&session_id), json!({ "attemptId": attempt_id })));
+        Ok(())
     }
 }

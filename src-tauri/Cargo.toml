@@ -22,11 +22,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 uuid = { version = "1", features = ["v4"] }
 argon2 = { version = "0.5", features = ["std"] }
-tokio = { version = "1", features = ["rt"] }
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+axum = { version = "0.8.9", features = ["ws"] }
+tower-http = { version = "0.7.1", features = ["limit"] }
+if-addrs = "0.15.0"
+mdns-sd = "0.21.4"
 
 [dev-dependencies]
+futures-util = "0.3.34"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio-tungstenite = "0.30.0"
 
 # Argon2 is deliberately slow; optimise it even in debug builds so dev logins stay snappy.
 [profile.dev.package.argon2]

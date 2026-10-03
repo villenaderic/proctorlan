@@ -33,6 +33,20 @@ pub fn run() {
             let db = tauri::async_runtime::block_on(database::Database::open(&db_path))?;
             app.manage(services::auth_service::AuthService::new(db.clone()));
             app.manage(services::exam_service::ExamService::new(db.clone()));
+
+            // LAN server: a failed start (e.g. port in use) is reported in Settings, never fatal.
+            let hub = server::hub::Hub::new();
+            let status = server::new_status();
+            let lan = std::sync::Arc::new(server::LanServer::new(db.clone(), hub.clone(), status.clone()));
+            let network = services::network_service::NetworkService::new(db.clone(), lan.clone());
+            tauri::async_runtime::block_on(async {
+                if let Err(e) = network.start_saved().await {
+                    tracing::warn!(error = %e, "LAN server did not start");
+                }
+            });
+            app.manage(services::session_service::SessionService::new(db.clone(), hub, status));
+            app.manage(network);
+            app.manage(lan);
             app.manage(db);
             Ok(())
         })
@@ -54,6 +68,12 @@ pub fn run() {
             commands::exams::set_exam_active,
             commands::exams::duplicate_exam,
             commands::exams::delete_exam,
+            commands::sessions::list_sessions,
+            commands::sessions::get_session_snapshot,
+            commands::sessions::create_session,
+            commands::sessions::session_action,
+            commands::network::network_info,
+            commands::network::update_network,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ProctorLAN");

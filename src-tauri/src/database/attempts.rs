@@ -81,4 +81,12 @@ impl Database {
     pub async fn count_answers(&self, attempt_id: &str) -> AppResult<i64> {
         Ok(sqlx::query_scalar("SELECT COUNT(*) FROM answers WHERE attempt_id = ?").bind(attempt_id).fetch_one(&self.pool).await?)
     }
+
+    pub async fn count_attempts_in_session(&self, session_id: &str) -> AppResult<i64> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM attempts WHERE session_id = ?").bind(session_id).fetch_one(&self.pool).await?)
+    }
+
+    pub async fn count_submitted_in_session(&self, session_id: &str) -> AppResult<i64> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM attempts WHERE session_id = ? AND status IN ('SUBMITTED','AUTO_SUBMITTED')").bind(session_id).fetch_one(&self.pool).await?)
+    }
 }

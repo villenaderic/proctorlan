@@ -1,0 +1,185 @@
+//! One WebSocket connection. Phase 5 scope: hello → welcome, heartbeat, timer sync, session broadcasts.
+//! Student join (name/ID), answers and proctor events arrive in Phases 6–9 as new message types.
+
+use std::net::IpAddr;
+
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use chrono::Utc;
+use serde_json::json;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::time::{interval, timeout, Instant};
+
+use crate::config;
+use crate::models::ExamSession;
+use crate::server::AppState;
+use crate::services::timer;
+use crate::websocket::protocol::{client, parse_frame, server as msg, Envelope};
+
+const CLOSE_POLICY: u16 = 1008;
+const CLOSE_TOO_BIG: u16 = 1009;
+
+async fn send(socket: &mut WebSocket, env: &Envelope) -> bool {
+    socket.send(Message::Text(env.to_text().into())).await.is_ok()
+}
+
+async fn close_with(socket: &mut WebSocket, code: u16, reason: &'static str) {
+    let _ = socket.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
+}
+
+fn timer_payload(s: &ExamSession) -> serde_json::Value {
+    let now = Utc::now();
+    json!({
+        "status": s.status,
+        "endsAt": s.ends_at,
+        "remainingSeconds": timer::remaining_seconds(
+            s.ends_at.as_deref().and_then(timer::parse),
+            s.paused_at.as_deref().and_then(timer::parse),
+            now,
+        ),
+        "serverTime": timer::format(now),
+    })
+}
+
+/// Reads the next text frame. `Ok(None)` = peer closed; `Err(code)` = protocol violation.
+async fn next_text(socket: &mut WebSocket) -> Result<Option<String>, &'static str> {
+    loop {
+        match socket.recv().await {
+            None | Some(Err(_)) => return Ok(None),
+            Some(Ok(Message::Text(t))) => return Ok(Some(t.as_str().to_string())),
+            Some(Ok(Message::Close(_))) => return Ok(None),
+            Some(Ok(Message::Binary(_))) => return Err("binary_not_supported"),
+            Some(Ok(_)) => continue, // ping/pong handled by the library
+        }
+    }
+}
+
+pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
+    if st.hub.is_blocked(ip) {
+        let _ = send(&mut socket, &Envelope::error("too_many_attempts", "Too many wrong codes. Wait a minute and try again.")).await;
+        close_with(&mut socket, CLOSE_POLICY, "blocked").await;
+        return;
+    }
+
+    // 1. The first frame must be a valid hello, soon.
+    let hello = match timeout(config::WS_HELLO_TIMEOUT, next_text(&mut socket)).await {
+        Err(_) => return close_with(&mut socket, CLOSE_POLICY, "hello timeout").await,
+        Ok(Ok(Some(t))) => t,
+        Ok(Ok(None)) => return,
+        Ok(Err(code)) => {
+            let _ = send(&mut socket, &Envelope::error(code, "Unsupported message.")).await;
+            return close_with(&mut socket, CLOSE_POLICY, "unsupported").await;
+        }
+    };
+    let hello = match parse_frame(&hello, config::MAX_WS_MESSAGE_BYTES) {
+        Ok(e) if e.kind == client::HELLO => e,
+        Ok(_) => {
+            let _ = send(&mut socket, &Envelope::error("hello_required", "Send hello first.")).await;
+            return close_with(&mut socket, CLOSE_POLICY, "hello required").await;
+        }
+        Err(code) => {
+            let _ = send(&mut socket, &Envelope::error(code, "That message could not be read.")).await;
+            let c = if code == "message_too_large" { CLOSE_TOO_BIG } else { CLOSE_POLICY };
+            return close_with(&mut socket, c, "bad message").await;
+        }
+    };
+
+    // 2. Resolve the session code. Wrong guesses are counted per address.
+    let code = hello.payload.get("sessionCode").and_then(|v| v.as_str()).unwrap_or("");
+    let session = match st.db.find_open_session_by_code(code).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            st.hub.note_failure(ip);
+            let _ = send(&mut socket, &Envelope::reply(msg::ERROR, &hello, None, json!({ "code": "session_not_found", "message": "No open session has that code." }))).await;
+            return close_with(&mut socket, CLOSE_POLICY, "session not found").await;
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "session lookup failed");
+            let _ = send(&mut socket, &Envelope::error("internal", "The server hit an error.")).await;
+            return;
+        }
+    };
+    let Some(_guard) = st.hub.try_join(&session.id) else {
+        let _ = send(&mut socket, &Envelope::error("session_full", "This session is full.")).await;
+        return close_with(&mut socket, CLOSE_POLICY, "session full").await;
+    };
+
+    let mut payload = timer_payload(&session);
+    if let Some(o) = payload.as_object_mut() {
+        o.insert("sessionId".into(), json!(session.id));
+        o.insert("heartbeatIntervalMs".into(), json!(config::HEARTBEAT_INTERVAL.as_millis() as u64));
+    }
+    if !send(&mut socket, &Envelope::reply(msg::WELCOME, &hello, Some(&session.id), payload)).await {
+        return;
+    }
+    tracing::info!(session_id = %session.id, %ip, "client connected");
+
+    // 3. Main loop.
+    let mut events = st.hub.subscribe();
+    let mut sync = interval(config::TIMER_SYNC_INTERVAL);
+    sync.tick().await; // first tick fires immediately; welcome already carried the time
+    let idle = config::disconnect_timeout();
+    let mut last_heard = Instant::now();
+
+    loop {
+        let deadline = last_heard + idle;
+        tokio::select! {
+            frame = socket.recv() => {
+                last_heard = Instant::now();
+                let text = match frame {
+                    None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(Message::Text(t))) => t,
+                    Some(Ok(Message::Binary(_))) => {
+                        let _ = send(&mut socket, &Envelope::error("binary_not_supported", "Unsupported message.")).await;
+                        continue;
+                    }
+                    Some(Ok(_)) => continue,
+                };
+                let env = match parse_frame(text.as_str(), config::MAX_WS_MESSAGE_BYTES) {
+                    Ok(e) => e,
+                    Err(code) => {
+                        if !send(&mut socket, &Envelope::error(code, "That message could not be read.")).await { break; }
+                        continue;
+                    }
+                };
+                match env.kind.as_str() {
+                    client::HEARTBEAT => {
+                        let ack = Envelope::reply(msg::HEARTBEAT_ACK, &env, Some(&session.id), json!({ "serverTime": timer::format(Utc::now()) }));
+                        if !send(&mut socket, &ack).await { break; }
+                    }
+                    other => {
+                        let e = Envelope::reply(msg::ERROR, &env, Some(&session.id), json!({ "code": "unknown_type", "message": format!("Unknown message type '{}'.", other.chars().take(32).collect::<String>()) }));
+                        if !send(&mut socket, &e).await { break; }
+                    }
+                }
+            }
+            ev = events.recv() => match ev {
+                Ok(e) if e.session_id.as_deref() == Some(session.id.as_str()) => {
+                    let ended = e.kind == msg::SESSION_ENDED;
+                    if !send(&mut socket, &e).await { break; }
+                    if ended { /* keep the socket: Phase 7 sends the final result over it */ }
+                }
+                Ok(_) => {}
+                // Missed broadcasts: resync from the database instead of guessing.
+                Err(RecvError::Lagged(_)) => {
+                    if let Ok(s) = st.db.get_session(&session.id).await {
+                        if !send(&mut socket, &Envelope::new(msg::TIMER_SYNC, Some(&session.id), timer_payload(&s))).await { break; }
+                    }
+                }
+                Err(RecvError::Closed) => break,
+            },
+            _ = sync.tick() => {
+                // Read the session fresh so a restart or teacher action is never contradicted.
+                match st.db.get_session(&session.id).await {
+                    Ok(s) => if !send(&mut socket, &Envelope::new(msg::TIMER_SYNC, Some(&session.id), timer_payload(&s))).await { break; },
+                    Err(_) => break,
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                tracing::info!(session_id = %session.id, %ip, "client silent too long, dropping connection");
+                close_with(&mut socket, CLOSE_POLICY, "heartbeat timeout").await;
+                break;
+            }
+        }
+    }
+    tracing::info!(session_id = %session.id, %ip, "client disconnected");
+}

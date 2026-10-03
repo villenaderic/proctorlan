@@ -30,6 +30,16 @@ pub const MAX_TEXT_LEN: usize = 5_000;
 pub const MAX_CHOICE_LEN: usize = 500;
 pub const MAX_POINTS: f64 = 1_000.0;
 pub const MAX_DURATION_MINUTES: i64 = 1_440;
+/// LAN server limits.
+pub const MAX_HTTP_BODY_BYTES: usize = 256 * 1024;
+pub const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+/// A WebSocket must send `hello` within this time or it is dropped.
+pub const WS_HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+/// Server broadcasts a time sync to connected clients this often.
+pub const TIMER_SYNC_INTERVAL: Duration = Duration::from_secs(5);
+pub const MDNS_SERVICE_TYPE: &str = "_proctorlan._tcp.local.";
+pub const SETTING_PORT: &str = "network.port";
+pub const SETTING_INTERFACE: &str = "network.interface";
 pub const DB_MAX_CONNECTIONS: u32 = 5;
 pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

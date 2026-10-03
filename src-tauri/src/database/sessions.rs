@@ -1,7 +1,9 @@
+use chrono::{DateTime, Utc};
+
 use super::{ids::*, Database};
 use crate::errors::{AppError, AppResult};
-use crate::models::{ExamSession, SessionStatus};
-use crate::services::session_code;
+use crate::models::{ExamSession, SessionRow, SessionStatus};
+use crate::services::{session_code, timer};
 
 const CODE_ATTEMPTS: usize = 10;
 
@@ -43,23 +45,59 @@ impl Database {
         Ok(sqlx::query_as("SELECT * FROM exam_sessions ORDER BY created_at DESC").fetch_all(&self.pool).await?)
     }
 
-    /// Validates the lifecycle transition inside a transaction. Timer fields (`ends_at`, pauses)
-    /// are owned by the exam engine (Phase 7); this only records status and start/end stamps.
+    pub async fn list_session_rows(&self) -> AppResult<Vec<SessionRow>> {
+        Ok(sqlx::query_as(
+            "SELECT s.*, e.title AS exam_title FROM exam_sessions s JOIN exams e ON e.id = s.exam_id ORDER BY s.created_at DESC",
+        ).fetch_all(&self.pool).await?)
+    }
+
+    pub async fn get_session_row(&self, id: &str) -> AppResult<SessionRow> {
+        sqlx::query_as("SELECT s.*, e.title AS exam_title FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.id = ?")
+            .bind(id).fetch_optional(&self.pool).await?
+            .ok_or_else(|| AppError::NotFound("Session not found.".into()))
+    }
+
     pub async fn transition_session(&self, id: &str, next: SessionStatus) -> AppResult<ExamSession> {
+        self.transition_session_at(id, next, Utc::now()).await
+    }
+
+    /// Validates the lifecycle transition and applies the server-authoritative timer rules
+    /// (start sets the deadline, pause freezes it, resume pushes it back) in one transaction.
+    pub async fn transition_session_at(&self, id: &str, next: SessionStatus, now: DateTime<Utc>) -> AppResult<ExamSession> {
         let mut tx = self.pool.begin().await?;
-        let current: SessionStatus = sqlx::query_scalar("SELECT status FROM exam_sessions WHERE id = ?").bind(id).fetch_optional(&mut *tx).await?
-            .ok_or_else(|| AppError::NotFound("Session not found.".into()))?;
+        let row: Option<(SessionStatus, Option<String>, Option<String>, Option<String>, i64, i64)> = sqlx::query_as(
+            "SELECT s.status, s.started_at, s.ends_at, s.paused_at, s.paused_total_seconds, e.duration_minutes
+               FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.id = ?",
+        ).bind(id).fetch_optional(&mut *tx).await?;
+        let (current, started_at, ends_at, paused_at, paused_total, duration) =
+            row.ok_or_else(|| AppError::NotFound("Session not found.".into()))?;
         if !current.can_transition_to(next) {
             return Err(AppError::Conflict(format!("Cannot change session from {current:?} to {next:?}.")));
         }
-        let ts = now();
+
+        let (mut started_at, mut ends_at, mut paused_at, mut paused_total) = (started_at, ends_at, paused_at, paused_total);
+        let stamp = timer::format(now);
+        match (current, next) {
+            (SessionStatus::Waiting, SessionStatus::Running) => {
+                started_at = Some(stamp.clone());
+                ends_at = Some(timer::format(timer::ends_at(now, duration)));
+            }
+            (SessionStatus::Running, SessionStatus::Paused) => paused_at = Some(stamp.clone()),
+            (SessionStatus::Paused, SessionStatus::Running) => {
+                if let (Some(e), Some(p)) = (ends_at.as_deref().and_then(timer::parse), paused_at.as_deref().and_then(timer::parse)) {
+                    ends_at = Some(timer::format(timer::extend_for_pause(e, p, now)));
+                    paused_total += (now - p).num_seconds().max(0);
+                }
+                paused_at = None;
+            }
+            _ => {}
+        }
+        let ended_at = (next == SessionStatus::Ended).then(|| stamp.clone());
         sqlx::query(
-            "UPDATE exam_sessions SET status = ?,
-               started_at = CASE WHEN ? = 'RUNNING' AND started_at IS NULL THEN ? ELSE started_at END,
-               ended_at   = CASE WHEN ? = 'ENDED' THEN ? ELSE ended_at END
-             WHERE id = ?",
+            "UPDATE exam_sessions SET status = ?, started_at = ?, ends_at = ?, paused_at = ?, paused_total_seconds = ?,
+               ended_at = COALESCE(?, ended_at) WHERE id = ?",
         )
-        .bind(next).bind(next).bind(&ts).bind(next).bind(&ts).bind(id)
+        .bind(next).bind(started_at).bind(ends_at).bind(paused_at).bind(paused_total).bind(ended_at).bind(id)
         .execute(&mut *tx).await?;
         tx.commit().await?;
         self.get_session(id).await

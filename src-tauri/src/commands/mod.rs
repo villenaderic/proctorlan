@@ -2,6 +2,8 @@
 
 pub mod auth;
 pub mod exams;
+pub mod network;
+pub mod sessions;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};

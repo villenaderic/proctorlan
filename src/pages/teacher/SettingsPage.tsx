@@ -1,6 +1,7 @@
 import { Moon, Sun } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Field, PasswordField } from "@/components/Field";
+import { NetworkCard } from "@/features/sessions/NetworkCard";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { authApi, isSessionExpired, toMessage } from "@/services/auth";
@@ -104,8 +105,8 @@ export function SettingsPage() {
       <h1 className="text-2xl font-semibold">Settings</h1>
       <ProfileCard />
       <PasswordCard />
+      <NetworkCard />
       <AppearanceCard />
-      <p className="text-sm text-slate-500">Network and application settings arrive with the LAN server (Phase 5).</p>
     </div>
   );
 }

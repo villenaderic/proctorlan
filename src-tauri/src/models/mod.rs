@@ -221,6 +221,15 @@ pub struct ExamSession {
 
 #[derive(Debug, Clone, Serialize, FromRow)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionRow {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub session: ExamSession,
+    pub exam_title: String,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
 pub struct Student {
     pub id: String,
     pub student_number: String,

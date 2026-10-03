@@ -1,1 +1,3 @@
-//! Implemented in a later phase. See docs/architecture.md.
+//! WebSocket protocol types and the connection handler.
+pub mod handler;
+pub mod protocol;

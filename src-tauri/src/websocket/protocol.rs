@@ -28,6 +28,9 @@ pub mod client {
     pub const HELLO: &str = "hello";
     pub const HEARTBEAT: &str = "heartbeat";
     pub const JOIN: &str = "join";
+    pub const START_EXAM: &str = "start_exam";
+    pub const ANSWER: &str = "answer";
+    pub const SUBMIT: &str = "submit";
 }
 
 /// Message types the server sends.
@@ -35,6 +38,10 @@ pub mod server {
     pub const WELCOME: &str = "welcome";
     pub const JOINED: &str = "joined";
     pub const REMOVED: &str = "removed";
+    pub const EXAM_PAPER: &str = "exam_paper";
+    pub const ANSWER_ACK: &str = "answer_ack";
+    pub const SUBMITTED: &str = "submitted";
+    pub const TIME_UP: &str = "time_up";
     pub const HEARTBEAT_ACK: &str = "heartbeat_ack";
     pub const TIMER_SYNC: &str = "timer_sync";
     pub const SESSION_WAITING: &str = "session_waiting";

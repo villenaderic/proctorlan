@@ -18,5 +18,10 @@ Someone already used that student ID in this session. If it was you on another d
 - Check the address matches the teacher's screen exactly, and the session is open.
 - Teacher: Windows may have blocked ProctorLAN in the firewall. Allow it on **Private networks**.
 
-## Not built yet
-Answering questions and submitting arrive in Phase 7. Today the student side stops at the waiting room and shows the server's countdown once the teacher starts.
+## During the exam
+- One question at a time. Your answers save automatically; the badge at the top shows "All answers saved".
+- The clock is the teacher's computer's clock. It turns amber at 5 minutes and red at 1 minute.
+- If the teacher pauses, your screen locks and the clock stops until they resume.
+- Press **Submit exam** when finished. A dialog lists any questions you left blank. After submitting you cannot change answers.
+- If time runs out the exam may submit for you automatically.
+- If your connection drops, keep working: answers are kept and sent when you reconnect. Before you submit, make sure the badge says saved.

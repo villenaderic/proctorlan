@@ -9,10 +9,11 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { useStudent } from "@/stores/student";
 import { formatClock } from "@/utils/format";
 import { displayRemaining } from "@/utils/sessionClock";
+import { ExamPage } from "./ExamPage";
 
-/** Waiting room today; the exam itself (questions, answers, submit) arrives in Phase 7. */
+/** Waiting room, plus the submitted / session-ended screens. The live exam is ExamPage. */
 export function StudentRoomPage() {
-  const { phase, connection, info, status, remainingSeconds, receivedAt, leave } = useStudent();
+  const { phase, connection, info, status, remainingSeconds, receivedAt, leave, paper, submitted, autoSubmitted, result, examError } = useStudent();
   const [now, setNow] = useState(() => Date.now());
   const [confirmLeave, setConfirmLeave] = useState(false);
   useEffect(() => {
@@ -20,6 +21,8 @@ export function StudentRoomPage() {
     return () => clearInterval(t);
   }, []);
   if (!info) return null;
+  // The exam itself: shown whenever questions are loaded and the student has not submitted.
+  if (paper && !submitted && phase === "in_session") return <ExamPage />;
 
   const ended = phase === "ended";
   const online = connection === "online";
@@ -48,11 +51,19 @@ export function StudentRoomPage() {
       )}
 
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-4 p-6">
-        {ended ? (
+        {submitted || ended ? (
           <Card className="space-y-3 p-8 text-center">
             <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" aria-hidden />
-            <h1 className="text-xl font-semibold">This session has ended</h1>
-            <p className="text-sm text-slate-600 dark:text-slate-300">Thank you. Your teacher will share results if they choose to.</p>
+            <h1 className="text-xl font-semibold">{submitted ? (autoSubmitted ? "Your exam was submitted automatically" : "Your exam has been submitted") : "This session has ended"}</h1>
+            {result ? (
+              <div role="status" className="space-y-1">
+                <p className="text-4xl font-semibold">{result.percentage}%</p>
+                <p className="text-sm">{result.score} of {result.totalPoints} points · <strong>{result.passed ? "Passed" : "Not passed"}</strong></p>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-600 dark:text-slate-300">{submitted ? "Your answers were received. Your teacher will share results if they choose to." : "Thank you. Your teacher will share results if they choose to."}</p>
+            )}
+            {examError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{examError}</p>}
             <Button className="mx-auto" onClick={leave}>Done</Button>
           </Card>
         ) : (
@@ -60,8 +71,9 @@ export function StudentRoomPage() {
             <Card className="space-y-2 p-6 text-center">
               {status === "WAITING" && (<><h1 className="text-xl font-semibold">You're in. Waiting for the teacher to start…</h1>
                 <p className="text-sm text-slate-600 dark:text-slate-300">Keep this window open. The exam begins for everyone at the same time.</p></>)}
-              {status === "RUNNING" && (<><h1 className="text-xl font-semibold">The exam has started</h1>
-                <p className="text-sm text-slate-600 dark:text-slate-300">The question screen is added in the next phase of ProctorLAN. Your timer below is the server's clock.</p></>)}
+              {status === "RUNNING" && (<><h1 className="text-xl font-semibold">The exam is starting…</h1>
+                <p className="text-sm text-slate-600 dark:text-slate-300">Loading your questions.</p>
+                {examError && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{examError}</p>}</>)}
               {status === "PAUSED" && (<><h1 className="flex items-center justify-center gap-2 text-xl font-semibold"><Pause className="h-5 w-5" aria-hidden /> Exam paused</h1>
                 <p className="text-sm text-slate-600 dark:text-slate-300">Your teacher paused the exam. The clock is stopped and will continue when they resume.</p></>)}
               {remaining !== null && (

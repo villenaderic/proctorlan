@@ -11,6 +11,7 @@ use crate::errors::{AppError, AppResult};
 use crate::models::*;
 use crate::server::hub::Hub;
 use crate::server::SharedStatus;
+use crate::services::exam_engine;
 use crate::services::exam_validation::validate_exam;
 use crate::services::timer;
 use crate::websocket::protocol::{server as msg, Envelope};
@@ -103,6 +104,12 @@ impl SessionService {
         };
         self.db.audit(Some(&user.id), audit, "session", Some(id), None).await?;
         tracing::info!(session_id = %id, action = audit, "session state changed");
+
+        // Ending closes and grades everyone still working, before students hear the session is over.
+        if action == SessionAction::End {
+            let n = exam_engine::finalize_session_attempts(&self.db, &self.hub, &after).await?;
+            tracing::info!(session_id = %id, auto_submitted = n, "session ended");
+        }
 
         let snap = self.snapshot(id).await?;
         let kind = match action {

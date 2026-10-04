@@ -57,6 +57,12 @@ impl Database {
             .ok_or_else(|| AppError::NotFound("Session not found.".into()))
     }
 
+    /// RUNNING sessions whose deadline has passed (paused sessions keep their clock frozen).
+    pub async fn list_expired_running_sessions(&self, now: DateTime<Utc>) -> AppResult<Vec<ExamSession>> {
+        let all: Vec<ExamSession> = sqlx::query_as("SELECT * FROM exam_sessions WHERE status = 'RUNNING' AND ends_at IS NOT NULL").fetch_all(&self.pool).await?;
+        Ok(all.into_iter().filter(|s| s.ends_at.as_deref().and_then(timer::parse).is_some_and(|e| e <= now)).collect())
+    }
+
     pub async fn transition_session(&self, id: &str, next: SessionStatus) -> AppResult<ExamSession> {
         self.transition_session_at(id, next, Utc::now()).await
     }

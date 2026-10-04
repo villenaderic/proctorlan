@@ -1,6 +1,7 @@
 use super::{ids::*, Database};
 use crate::errors::{AppError, AppResult};
-use crate::models::{Answer, Attempt, AttemptStatus, RosterRow, Student};
+use crate::models::{Answer, Attempt, AttemptStatus, ExamFull, RosterRow, Student};
+use crate::services::grading;
 
 impl Database {
     /// Creates the student or refreshes the display name for an existing student number.
@@ -97,7 +98,9 @@ impl Database {
 
     pub async fn list_roster(&self, session_id: &str) -> AppResult<Vec<RosterRow>> {
         Ok(sqlx::query_as(
-            "SELECT a.id AS attempt_id, s.student_number, s.name, a.status, a.created_at AS joined_at, a.submitted_at
+            "SELECT a.id AS attempt_id, s.student_number, s.name, a.status, a.created_at AS joined_at, a.submitted_at,
+                    (SELECT COUNT(*) FROM answers w WHERE w.attempt_id = a.id AND w.answer_data NOT IN ('\"\"', '[]')) AS answered,
+                    a.percentage, a.passed
              FROM attempts a JOIN students s ON s.id = a.student_id
              WHERE a.session_id = ? ORDER BY a.created_at, s.name",
         ).bind(session_id).fetch_all(&self.pool).await?)
@@ -112,5 +115,37 @@ impl Database {
             return Err(AppError::Conflict("This student has already started the exam and cannot be removed.".into()));
         }
         Ok(attempt.session_id)
+    }
+
+    pub async fn list_in_progress_attempts(&self, session_id: &str) -> AppResult<Vec<Attempt>> {
+        Ok(sqlx::query_as("SELECT * FROM attempts WHERE session_id = ? AND status = 'IN_PROGRESS'").bind(session_id).fetch_all(&self.pool).await?)
+    }
+
+    /// Grades every saved answer and closes the attempt, all in one transaction. The status flip
+    /// comes first so a concurrent late answer cannot slip in ungraded. Returns `None` if the
+    /// attempt was already final (idempotent: callers never double-grade).
+    pub async fn finalize_attempt(&self, attempt_id: &str, status: AttemptStatus, exam: &ExamFull) -> AppResult<Option<Attempt>> {
+        debug_assert!(status.is_final());
+        let mut tx = self.pool.begin().await?;
+        let ts = now();
+        let res = sqlx::query("UPDATE attempts SET status = ?, submitted_at = ? WHERE id = ? AND status IN ('JOINED','IN_PROGRESS')")
+            .bind(status).bind(&ts).bind(attempt_id).execute(&mut *tx).await?;
+        if res.rows_affected() == 0 {
+            return Ok(None);
+        }
+        let answers: Vec<Answer> = sqlx::query_as("SELECT * FROM answers WHERE attempt_id = ?").bind(attempt_id).fetch_all(&mut *tx).await?;
+        let mut score = 0.0;
+        for a in &answers {
+            let Some(q) = exam.questions.iter().find(|q| q.question.id == a.question_id) else { continue };
+            let (ok, pts) = grading::grade(q, &a.answer_data);
+            score += pts;
+            sqlx::query("UPDATE answers SET is_correct = ?, points_awarded = ? WHERE id = ?").bind(ok).bind(pts).bind(&a.id).execute(&mut *tx).await?;
+        }
+        let total: f64 = exam.questions.iter().map(|q| q.question.points).sum();
+        let t = grading::totals(score, total, exam.exam.passing_score);
+        sqlx::query("UPDATE attempts SET score = ?, total_points = ?, percentage = ?, passed = ? WHERE id = ?")
+            .bind(t.score).bind(t.total_points).bind(t.percentage).bind(t.passed).bind(attempt_id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        Ok(Some(self.get_attempt(attempt_id).await?))
     }
 }

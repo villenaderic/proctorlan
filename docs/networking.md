@@ -44,7 +44,7 @@ Server → client: `welcome`, `joined`, `removed`, `heartbeat_ack`, `timer_sync`
 - `joined` includes the exam title, description, instructions, duration and question count, but **no questions or answers**.
 - Students can join while the session is WAITING, RUNNING or PAUSED, never after it ENDS.
 
-Answers, submit and proctor events are added in Phases 7–9.
+Answers and submit (Phase 7) are described in `docs/exam-engine.md`. Proctor events arrive in Phase 9.
 
 ## Not verified here
 Tests run over real sockets on 127.0.0.1. **Not yet verified:** a second physical machine on a real LAN,

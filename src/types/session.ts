@@ -57,5 +57,8 @@ export interface RosterRow {
   status: AttemptStatus;
   joinedAt: string;
   submittedAt: string | null;
+  answered: number;
+  percentage: number | null;
+  passed: boolean | null;
   online: boolean;
 }

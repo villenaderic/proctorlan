@@ -313,6 +313,10 @@ pub struct RosterRow {
     pub status: AttemptStatus,
     pub joined_at: String,
     pub submitted_at: Option<String>,
+    /// Questions with a non-empty saved answer.
+    pub answered: i64,
+    pub percentage: Option<f64>,
+    pub passed: Option<bool>,
     #[sqlx(skip)]
     pub online: bool,
 }

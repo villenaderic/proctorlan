@@ -129,7 +129,7 @@ export function SessionLivePage() {
                   <td className="px-4 py-2">
                     <Badge tone={r.online ? "green" : "amber"}>{r.online ? <Wifi className="h-3 w-3" aria-hidden /> : <WifiOff className="h-3 w-3" aria-hidden />}{r.online ? "Online" : "Disconnected"}</Badge>
                   </td>
-                  <td className="px-4 py-2">{r.status === "JOINED" ? "Joined" : r.status === "IN_PROGRESS" ? "In progress" : "Submitted"}</td>
+                  <td className="px-4 py-2">{progressLabel(r, snap.questionCount)}</td>
                   <td className="px-4 py-2 text-right">
                     {r.status === "JOINED" && !ended && (
                       <Button size="sm" variant="outline" onClick={() => setToRemove(r)} aria-label={`Remove ${r.name}`}><UserMinus className="h-3.5 w-3.5" aria-hidden /> Remove</Button>
@@ -143,7 +143,7 @@ export function SessionLivePage() {
       </Card>
 
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        {snap.questionCount} questions · passing score {snap.passingScore}%. Student join, answers and live proctoring arrive in the next phases.
+        {snap.questionCount} questions · passing score {snap.passingScore}%. Live proctoring events arrive in Phase 9.
       </p>
 
       <ConfirmDialog open={!!toRemove} danger title={`Remove ${toRemove?.name ?? "student"}?`} confirmLabel="Remove"
@@ -162,6 +162,13 @@ export function SessionLivePage() {
       </ConfirmDialog>
     </div>
   );
+}
+
+function progressLabel(r: RosterRow, questionCount: number): string {
+  if (r.status === "JOINED") return "Joined";
+  if (r.status === "IN_PROGRESS") return `In progress · ${r.answered}/${questionCount}`;
+  const how = r.status === "AUTO_SUBMITTED" ? "Auto-submitted" : "Submitted";
+  return r.percentage == null ? how : `${how} · ${r.percentage}% ${r.passed ? "(passed)" : "(not passed)"}`;
 }
 
 function Stat({ label, value, icon }: { label: string; value: number; icon?: boolean }) {

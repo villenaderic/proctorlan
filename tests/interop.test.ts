@@ -8,6 +8,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { StudentClient, type JoinedInfo } from "../src/features/student/client";
+import { __resetStudentForTests, useStudent } from "../src/stores/student";
 
 const enabled = process.env.PROCTORLAN_INTEROP === "1";
 
@@ -15,6 +16,7 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
   let proc: ChildProcessWithoutNullStreams;
   let lines: AsyncIterator<string>;
   let info: { port: number; code: string };
+  let code: string;
 
   const command = async (c: string) => { proc.stdin.write(c + "\n"); return JSON.parse((await lines.next()).value); };
   const until = async (cond: () => boolean, ms = 5000) => {
@@ -26,13 +28,14 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
     proc = spawn("cargo", ["run", "--quiet", "--example", "dev_server"], { cwd: "src-tauri", env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: "0" } });
     lines = createInterface({ input: proc.stdout })[Symbol.asyncIterator]();
     info = JSON.parse((await lines.next()).value);
+    code = info.code;
   }, 600_000);
   afterAll(() => { proc?.stdin.write("quit\n"); proc?.kill(); });
 
   function connect(name: string, id: string, token: string | null = null) {
     const log = { joined: [] as JoinedInfo[], messages: [] as string[], fatal: [] as any[], states: [] as string[] };
     const client = new StudentClient(
-      { host: "127.0.0.1", port: info.port, sessionCode: info.code, studentName: name, studentId: id, token },
+      { host: "127.0.0.1", port: info.port, sessionCode: code, studentName: name, studentId: id, token },
       { onState: (s) => log.states.push(s), onJoined: (j) => log.joined.push(j), onMessage: (m) => log.messages.push(m.type), onFatal: (f) => log.fatal.push(f) },
       { backoffMs: [100, 200] },
     );
@@ -44,7 +47,7 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
     const a = connect("Ana Reyes", "2024-001");
     await until(() => a.log.joined.length === 1);
     expect(a.log.joined[0]).toMatchObject({ studentName: "Ana Reyes", studentId: "2024-001", resumed: false, status: "WAITING" });
-    expect(a.log.joined[0].exam).toMatchObject({ title: "Dev Exam", questionCount: 1, durationMinutes: 30 });
+    expect(a.log.joined[0].exam).toMatchObject({ title: "Dev Exam", questionCount: 2, durationMinutes: 30 });
     expect(a.log.joined[0].token).toHaveLength(64);
 
     const roster = await command("roster");
@@ -69,5 +72,33 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
     await command("end");
     await until(() => back.log.messages.includes("session_ended"));
     back.client.stop();
+  }, 30_000);
+
+  it("full exam through the real student store: open, answer, autosave, submit, graded result", async () => {
+    code = (await command("new")).code;
+    __resetStudentForTests();
+    const st = () => useStudent.getState();
+    st().join({ host: "127.0.0.1", port: info.port, sessionCode: code, studentName: "Ana Reyes", studentId: "S-1", token: null });
+    await until(() => st().phase === "in_session");
+    expect(st().paper).toBeNull(); // still waiting: no questions before the teacher starts
+
+    await command("start");
+    await until(() => st().paper !== null);
+    const paper = st().paper!;
+    expect(paper.questions.map((q) => q.text)).toEqual(["1+1?", "Capital of France?"]);
+    expect(JSON.stringify(paper)).not.toMatch(/isCorrect|Paris/); // answer keys never reach the student
+
+    const mc = paper.questions[0];
+    st().setAnswer(mc.id, mc.choices.find((c) => c.text === "2")!.id);
+    st().setAnswer(paper.questions[1].id, "  PARIS ");
+    await until(() => Object.keys(st().pending).length === 0); // both acknowledged by the server
+    expect(st().saveState()).toBe("saved");
+
+    expect(await st().submit()).toBe(true);
+    expect(st().submitted).toBe(true);
+    expect(st().result).toMatchObject({ score: 2, totalPoints: 2, percentage: 100, passed: true });
+    const roster = await command("roster");
+    expect(roster[0]).toMatchObject({ studentNumber: "S-1", status: "SUBMITTED", percentage: 100, passed: true, answered: 2 });
+    __resetStudentForTests();
   }, 30_000);
 });

@@ -13,6 +13,7 @@ use crate::config;
 use crate::models::ExamSession;
 use crate::server::hub::OnlineGuard;
 use crate::server::AppState;
+use crate::services::exam_engine::{self, EngineError};
 use crate::services::join_service::{self, JoinError};
 use crate::services::timer;
 use crate::websocket::protocol::{client, parse_frame, server as msg, Envelope};
@@ -154,6 +155,13 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                         let reply = handle_join(&st, &session, &env, &mut joined).await;
                         if !send(&mut socket, &reply).await { break; }
                     }
+                    client::START_EXAM | client::ANSWER | client::SUBMIT => {
+                        let reply = match joined.as_ref() {
+                            None => Envelope::reply(msg::ERROR, &env, Some(&session.id), json!({ "code": "join_required", "message": "Join the session first." })),
+                            Some((attempt_id, _)) => handle_exam_message(&st, &session.id, attempt_id, &env).await,
+                        };
+                        if !send(&mut socket, &reply).await { break; }
+                    }
                     other => {
                         let e = Envelope::reply(msg::ERROR, &env, Some(&session.id), json!({ "code": "unknown_type", "message": format!("Unknown message type '{}'.", other.chars().take(32).collect::<String>()) }));
                         if !send(&mut socket, &e).await { break; }
@@ -161,12 +169,16 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                 }
             }
             ev = events.recv() => match ev {
-                Ok(e) if e.kind == msg::REMOVED && e.session_id.as_deref() == Some(session.id.as_str()) => {
-                    // Only the removed student's own sockets are told; everyone else ignores it.
-                    if joined.as_ref().is_some_and(|(id, _)| e.payload["attemptId"].as_str() == Some(id.as_str())) {
-                        let _ = send(&mut socket, &e).await;
-                        close_with(&mut socket, CLOSE_POLICY, "removed").await;
-                        break;
+                // Envelopes addressed to one attempt (removed, submitted) reach only that student's sockets.
+                Ok(e) if e.session_id.as_deref() == Some(session.id.as_str()) && e.payload.get("attemptId").is_some() => {
+                    let mine = joined.as_ref().is_some_and(|(id, _)| e.payload["attemptId"].as_str() == Some(id.as_str()));
+                    if mine {
+                        let removed = e.kind == msg::REMOVED;
+                        if !send(&mut socket, &e).await { break; }
+                        if removed {
+                            close_with(&mut socket, CLOSE_POLICY, "removed").await;
+                            break;
+                        }
                     }
                 }
                 Ok(e) if e.session_id.as_deref() == Some(session.id.as_str()) => {
@@ -242,4 +254,47 @@ async fn handle_join(st: &AppState, session: &ExamSession, env: &Envelope, joine
     }
     tracing::info!(session_id = %session.id, attempt_id = %outcome.attempt.id, resumed = outcome.new_token.is_none(), "student joined");
     Envelope::reply(msg::JOINED, env, Some(&session.id), payload)
+}
+
+/// start_exam / answer / submit. The server re-reads the session every time: clients are never trusted
+/// about status or time.
+async fn handle_exam_message(st: &AppState, session_id: &str, attempt_id: &str, env: &Envelope) -> Envelope {
+    let fail = |e: EngineError| Envelope::reply(msg::ERROR, env, Some(session_id), json!({ "code": e.code(), "message": e.message() }));
+    let session = match st.db.get_session(session_id).await {
+        Ok(s) => s,
+        Err(_) => return fail(EngineError::Internal),
+    };
+    match env.kind.as_str() {
+        client::START_EXAM => match exam_engine::start(&st.db, &session, attempt_id).await {
+            Ok((paper, _)) => {
+                let mut payload = timer_payload(&session);
+                if let Some(o) = payload.as_object_mut() {
+                    o.insert("paper".into(), serde_json::to_value(&paper).unwrap_or_default());
+                }
+                Envelope::reply(msg::EXAM_PAPER, env, Some(session_id), payload)
+            }
+            Err(e) => fail(e),
+        },
+        client::ANSWER => {
+            let qid = env.payload.get("questionId").and_then(|v| v.as_str()).unwrap_or("");
+            let seq = env.payload.get("clientSeq").and_then(|v| v.as_i64()).unwrap_or(-1);
+            let answer = env.payload.get("answer").cloned().unwrap_or(serde_json::Value::Null);
+            match exam_engine::save_answer(&st.db, &session, attempt_id, qid, &answer, seq).await {
+                Ok(stored) => Envelope::reply(msg::ANSWER_ACK, env, Some(session_id), json!({ "questionId": qid, "clientSeq": seq, "stored": stored })),
+                Err(e) => {
+                    // Echo the question so a client retry queue can drop or keep the right entry.
+                    let mut r = fail(e);
+                    if let Some(o) = r.payload.as_object_mut() {
+                        o.insert("questionId".into(), json!(qid));
+                        o.insert("clientSeq".into(), json!(seq));
+                    }
+                    r
+                }
+            }
+        }
+        _ => match exam_engine::submit(&st.db, &session, attempt_id).await {
+            Ok(result) => Envelope::reply(msg::SUBMITTED, env, Some(session_id), json!({ "attemptId": attempt_id, "auto": false, "result": result })),
+            Err(e) => fail(e),
+        },
+    }
 }

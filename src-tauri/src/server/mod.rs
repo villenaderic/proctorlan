@@ -50,6 +50,7 @@ pub struct AppState {
 struct Running {
     shutdown: oneshot::Sender<()>,
     join: JoinHandle<()>,
+    sweeper: JoinHandle<()>,
     mdns: Option<crate::networking::mdns::Advertiser>,
 }
 
@@ -95,10 +96,23 @@ impl LanServer {
                 tracing::error!(error = %e, "LAN server stopped unexpectedly");
             }
         });
+        // Deadline watcher: announces time_up and auto-submits when an exam's clock runs out.
+        let (db, hub) = (self.state.db.clone(), self.state.hub.clone());
+        let sweeper = tokio::spawn(async move {
+            let mut notified = std::collections::HashSet::new();
+            let mut tick = tokio::time::interval(config::EXPIRY_SWEEP_INTERVAL);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                if let Err(e) = crate::services::exam_engine::expire_due(&db, &hub, &mut notified).await {
+                    tracing::error!(error = %e, "expiry sweep failed");
+                }
+            }
+        });
         // Discovery is a convenience only; failing to advertise never stops the server.
         let mdns = if advertise { crate::networking::mdns::Advertiser::start(ip, local.port()) } else { None };
         let discovery = mdns.is_some();
-        *self.running.lock().await = Some(Running { shutdown: tx, join, mdns });
+        *self.running.lock().await = Some(Running { shutdown: tx, join, sweeper, mdns });
         self.set_status(|s| *s = ServerStatus { running: true, ip: ip.to_string(), port: local.port(), discovery, error: None });
         tracing::info!(%local, discovery, "LAN server listening");
         Ok(self.status())
@@ -106,6 +120,7 @@ impl LanServer {
 
     pub async fn stop(&self) {
         if let Some(r) = self.running.lock().await.take() {
+            r.sweeper.abort();
             let _ = r.shutdown.send(());
             // Open WebSockets would block a graceful shutdown forever; give it a moment, then abort.
             let abort = r.join.abort_handle();

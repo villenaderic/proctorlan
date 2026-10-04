@@ -1,6 +1,8 @@
 pub mod auth_service;
 pub mod exam_service;
+pub mod exam_engine;
 pub mod exam_validation;
+pub mod grading;
 pub mod join_service;
 pub mod network_service;
 pub mod session_code;

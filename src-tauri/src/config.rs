@@ -40,6 +40,12 @@ pub const TIMER_SYNC_INTERVAL: Duration = Duration::from_secs(5);
 pub const MDNS_SERVICE_TYPE: &str = "_proctorlan._tcp.local.";
 pub const SETTING_PORT: &str = "network.port";
 pub const SETTING_INTERFACE: &str = "network.interface";
+/// Longest typed answer for an identification question.
+pub const MAX_IDENTIFICATION_ANSWER_LEN: usize = 500;
+/// Network-delay allowance: answers arriving this soon after the deadline still count.
+pub const ANSWER_GRACE: Duration = Duration::from_secs(3);
+/// How often the server checks for sessions whose time has run out.
+pub const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 pub const DB_MAX_CONNECTIONS: u32 = 5;
 pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

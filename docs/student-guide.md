@@ -24,4 +24,5 @@ Someone already used that student ID in this session. If it was you on another d
 - If the teacher pauses, your screen locks and the clock stops until they resume.
 - Press **Submit exam** when finished. A dialog lists any questions you left blank. After submitting you cannot change answers.
 - If time runs out the exam may submit for you automatically.
-- If your connection drops, keep working: answers are kept and sent when you reconnect. Before you submit, make sure the badge says saved.
+- If your connection drops, keep working: answers are kept on your computer (even if the app closes) and sent when you reconnect. Before you submit, make sure the badge says saved.
+- If you see "closed because this exam was opened on another device or window", only one window can hold your exam at a time. Use the one that is still open.

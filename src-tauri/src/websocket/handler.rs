@@ -10,12 +10,14 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{interval, timeout, Instant};
 
 use crate::config;
+use crate::database::ids::new_id;
 use crate::models::ExamSession;
 use crate::server::hub::OnlineGuard;
 use crate::server::AppState;
 use crate::services::exam_engine::{self, EngineError};
 use crate::services::join_service::{self, JoinError};
 use crate::services::timer;
+use crate::websocket::limiter::{RateLimiter, Verdict};
 use crate::websocket::protocol::{client, parse_frame, server as msg, Envelope};
 
 const CLOSE_POLICY: u16 = 1008;
@@ -124,6 +126,8 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
     let mut last_heard = Instant::now();
     // Set once this connection has joined as a student; the guard marks them online.
     let mut joined: Option<(String, OnlineGuard)> = None;
+    let conn_id = new_id();
+    let mut limiter = RateLimiter::new(config::RATE_SOFT_PER_SECOND, config::RATE_HARD_PER_SECOND, std::time::Instant::now());
 
     loop {
         let deadline = last_heard + idle;
@@ -139,6 +143,18 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                     }
                     Some(Ok(_)) => continue,
                 };
+                match limiter.check(std::time::Instant::now()) {
+                    Verdict::Allow => {}
+                    Verdict::Throttle => {
+                        if !send(&mut socket, &Envelope::error("rate_limited", "Too many messages. Slow down.")).await { break; }
+                        continue;
+                    }
+                    Verdict::Close => {
+                        tracing::warn!(session_id = %session.id, %ip, "client flooding, closing");
+                        close_with(&mut socket, CLOSE_POLICY, "rate limited").await;
+                        break;
+                    }
+                }
                 let env = match parse_frame(text.as_str(), config::MAX_WS_MESSAGE_BYTES) {
                     Ok(e) => e,
                     Err(code) => {
@@ -152,10 +168,10 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                         if !send(&mut socket, &ack).await { break; }
                     }
                     client::JOIN => {
-                        let reply = handle_join(&st, &session, &env, &mut joined).await;
+                        let reply = handle_join(&st, &session, &env, &mut joined, &conn_id).await;
                         if !send(&mut socket, &reply).await { break; }
                     }
-                    client::START_EXAM | client::ANSWER | client::SUBMIT => {
+                    client::START_EXAM | client::ANSWER | client::SUBMIT | client::ANSWERS_SYNC => {
                         let reply = match joined.as_ref() {
                             None => Envelope::reply(msg::ERROR, &env, Some(&session.id), json!({ "code": "join_required", "message": "Join the session first." })),
                             Some((attempt_id, _)) => handle_exam_message(&st, &session.id, attempt_id, &env).await,
@@ -172,7 +188,14 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                 // Envelopes addressed to one attempt (removed, submitted) reach only that student's sockets.
                 Ok(e) if e.session_id.as_deref() == Some(session.id.as_str()) && e.payload.get("attemptId").is_some() => {
                     let mine = joined.as_ref().is_some_and(|(id, _)| e.payload["attemptId"].as_str() == Some(id.as_str()));
-                    if mine {
+                    if mine && e.kind == msg::REPLACED {
+                        // A newer connection took over this attempt. Ignore our own announcement.
+                        if e.payload["connId"].as_str() != Some(conn_id.as_str()) {
+                            let _ = send(&mut socket, &Envelope::new(msg::REPLACED, Some(&session.id), json!({ "attemptId": e.payload["attemptId"] }))).await;
+                            close_with(&mut socket, CLOSE_POLICY, "replaced").await;
+                            break;
+                        }
+                    } else if mine {
                         let removed = e.kind == msg::REMOVED;
                         if !send(&mut socket, &e).await { break; }
                         if removed {
@@ -213,7 +236,7 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
 }
 
 /// Handles `join {studentName, studentId, token?}`. Never reveals questions or answers.
-async fn handle_join(st: &AppState, session: &ExamSession, env: &Envelope, joined: &mut Option<(String, OnlineGuard)>) -> Envelope {
+async fn handle_join(st: &AppState, session: &ExamSession, env: &Envelope, joined: &mut Option<(String, OnlineGuard)>, conn_id: &str) -> Envelope {
     let err = |e: JoinError| Envelope::reply(msg::ERROR, env, Some(&session.id), json!({ "code": e.code(), "message": e.message() }));
     if joined.is_some() {
         return err(JoinError::Invalid("This connection has already joined.".into()));
@@ -235,6 +258,8 @@ async fn handle_join(st: &AppState, session: &ExamSession, env: &Envelope, joine
         Err(_) => return err(JoinError::Internal),
     };
     *joined = Some((outcome.attempt.id.clone(), st.hub.mark_online(&outcome.attempt.id, &session.id)));
+    // If this attempt is already open on another connection (stale socket, second window), that one yields.
+    st.hub.publish(Envelope::new(msg::REPLACED, Some(&session.id), json!({ "attemptId": outcome.attempt.id, "connId": conn_id })));
 
     let mut payload = timer_payload(&current);
     if let Some(o) = payload.as_object_mut() {
@@ -292,9 +317,49 @@ async fn handle_exam_message(st: &AppState, session_id: &str, attempt_id: &str, 
                 }
             }
         }
+        client::ANSWERS_SYNC => sync_answers(st, &session, attempt_id, env).await,
         _ => match exam_engine::submit(&st.db, &session, attempt_id).await {
             Ok(result) => Envelope::reply(msg::SUBMITTED, env, Some(session_id), json!({ "attemptId": attempt_id, "auto": false, "result": result })),
             Err(e) => fail(e),
         },
     }
+}
+
+/// `answers_sync {answers:[{questionId, answer, clientSeq}]}`: a batch for a student who was offline.
+/// Each item gets its own verdict; a terminal condition (paused, time up, submitted) applies to the rest.
+async fn sync_answers(st: &AppState, session: &ExamSession, attempt_id: &str, env: &Envelope) -> Envelope {
+    let bad = |m: &str| Envelope::reply(msg::ERROR, env, Some(&session.id), json!({ "code": "invalid_answer", "message": m }));
+    let Some(items) = env.payload.get("answers").and_then(|v| v.as_array()) else { return bad("answers must be a list.") };
+    if items.len() > config::MAX_SYNC_BATCH {
+        return bad("Too many answers in one batch.");
+    }
+    let mut results = Vec::with_capacity(items.len());
+    let mut terminal: Option<EngineError> = None;
+    for item in items {
+        let qid = item.get("questionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let seq = item.get("clientSeq").and_then(|v| v.as_i64()).unwrap_or(-1);
+        let verdict = if let Some(t) = &terminal {
+            json!({ "status": t.code(), "message": t.message() })
+        } else {
+            let answer = item.get("answer").cloned().unwrap_or(serde_json::Value::Null);
+            match exam_engine::save_answer(&st.db, session, attempt_id, &qid, &answer, seq).await {
+                Ok(true) => json!({ "status": "stored" }),
+                Ok(false) => json!({ "status": "duplicate" }),
+                Err(e) => {
+                    let v = json!({ "status": e.code(), "message": e.message() });
+                    if matches!(e, EngineError::NotRunning | EngineError::TimeUp | EngineError::AlreadySubmitted | EngineError::NotStarted) {
+                        terminal = Some(e);
+                    }
+                    v
+                }
+            }
+        };
+        let mut r = verdict;
+        if let Some(o) = r.as_object_mut() {
+            o.insert("questionId".into(), json!(qid));
+            o.insert("clientSeq".into(), json!(seq));
+        }
+        results.push(r);
+    }
+    Envelope::reply(msg::ANSWERS_SYNCED, env, Some(&session.id), json!({ "results": results }))
 }

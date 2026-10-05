@@ -29,3 +29,10 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   PAUSED: "Paused",
   ENDED: "Ended",
 };
+
+/**
+ * Clock for countdown smoothing. `performance.now()` is monotonic: if the student (or the OS)
+ * changes the computer's date/time mid-exam, the countdown does not jump. The authoritative
+ * deadline is always the server's `remainingSeconds`.
+ */
+export const monotonicNow = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());

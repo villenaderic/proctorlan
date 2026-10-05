@@ -9,6 +9,8 @@ import { createInterface } from "node:readline";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { StudentClient, type JoinedInfo } from "../src/features/student/client";
 import { __resetStudentForTests, useStudent } from "../src/stores/student";
+import { saveQueue } from "../src/features/student/queue";
+import { MemoryStorage } from "./helpers/fakeServer";
 
 const enabled = process.env.PROCTORLAN_INTEROP === "1";
 
@@ -25,6 +27,7 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
   };
 
   beforeAll(async () => {
+    (globalThis as any).localStorage = new MemoryStorage();
     proc = spawn("cargo", ["run", "--quiet", "--example", "dev_server"], { cwd: "src-tauri", env: { ...process.env, CARGO_PROFILE_DEV_DEBUG: "0" } });
     lines = createInterface({ input: proc.stdout })[Symbol.asyncIterator]();
     info = JSON.parse((await lines.next()).value);
@@ -99,6 +102,34 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
     expect(st().result).toMatchObject({ score: 2, totalPoints: 2, percentage: 100, passed: true });
     const roster = await command("roster");
     expect(roster[0]).toMatchObject({ studentNumber: "S-1", status: "SUBMITTED", percentage: 100, passed: true, answered: 2 });
+    __resetStudentForTests();
+  }, 30_000);
+
+  it("answers queued on disk before a crash are uploaded as a batch after rejoining with the saved token", async () => {
+    code = (await command("new")).code;
+    __resetStudentForTests();
+    const st = () => useStudent.getState();
+    st().join({ host: "127.0.0.1", port: info.port, sessionCode: code, studentName: "Ben Cruz", studentId: "S-2", token: null });
+    await until(() => st().phase === "in_session");
+    await command("start");
+    await until(() => st().paper !== null);
+    const { attemptId, token } = st().info!;
+    const [q1, q2] = st().paper!.questions;
+    const right = q1.choices.find((c) => c.text === "2")!.id;
+
+    // The app "crashes" with two answers still queued on disk (never reached the server).
+    __resetStudentForTests({ keepDisk: true });
+    saveQueue(attemptId, { [q1.id]: { answer: right, seq: Date.now() }, [q2.id]: { answer: "paris", seq: Date.now() + 1 } });
+
+    st().join({ host: "127.0.0.1", port: info.port, sessionCode: code, studentName: "Ben Cruz", studentId: "S-2", token });
+    await until(() => st().paper !== null && Object.keys(st().pending).length === 0);
+    expect(st().info!.resumed).toBe(true);
+    expect(st().answers).toMatchObject({ [q1.id]: right, [q2.id]: "paris" });
+    const roster = await command("roster");
+    expect(roster.find((r: any) => r.studentNumber === "S-2")).toMatchObject({ answered: 2, status: "IN_PROGRESS" });
+
+    expect(await st().submit()).toBe(true);
+    expect(st().result).toMatchObject({ percentage: 100, passed: true });
     __resetStudentForTests();
   }, 30_000);
 });

@@ -31,6 +31,7 @@ pub mod client {
     pub const START_EXAM: &str = "start_exam";
     pub const ANSWER: &str = "answer";
     pub const SUBMIT: &str = "submit";
+    pub const ANSWERS_SYNC: &str = "answers_sync";
 }
 
 /// Message types the server sends.
@@ -42,6 +43,9 @@ pub mod server {
     pub const ANSWER_ACK: &str = "answer_ack";
     pub const SUBMITTED: &str = "submitted";
     pub const TIME_UP: &str = "time_up";
+    pub const ANSWERS_SYNCED: &str = "answers_synced";
+    /// Another connection took over this student's attempt; this one is closed.
+    pub const REPLACED: &str = "replaced";
     pub const HEARTBEAT_ACK: &str = "heartbeat_ack";
     pub const TIMER_SYNC: &str = "timer_sync";
     pub const SESSION_WAITING: &str = "session_waiting";

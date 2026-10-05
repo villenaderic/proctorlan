@@ -8,7 +8,7 @@ import { useStudent } from "@/stores/student";
 import { QUESTION_TYPE_LABELS } from "@/types/exam";
 import { cn } from "@/utils/cn";
 import { formatClock } from "@/utils/format";
-import { displayRemaining } from "@/utils/sessionClock";
+import { displayRemaining, monotonicNow } from "@/utils/sessionClock";
 import { answeredCount, isAnswered, timerAnnouncement, timerTone, unansweredIndexes } from "./paper";
 import { QuestionInput } from "./QuestionInput";
 
@@ -18,13 +18,13 @@ const TONE = { normal: "text-slate-900 dark:text-white", warning: "text-amber-60
 export function ExamPage() {
   const s = useStudent();
   const { paper, answers, current, status, info } = s;
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => monotonicNow());
   const [confirm, setConfirm] = useState(false);
   const spoken = useRef<string | null>(null);
   const [announce, setAnnounce] = useState("");
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(monotonicNow()), 1000);
     return () => clearInterval(t);
   }, []);
 
@@ -53,7 +53,7 @@ export function ExamPage() {
         </div>
         <Badge tone={save === "saved" ? "green" : "amber"} aria-live="polite">
           {save === "saved" ? <Cloud className="h-3 w-3" aria-hidden /> : <CloudOff className="h-3 w-3" aria-hidden />}
-          {save === "saved" ? "All answers saved" : save === "saving" ? "Saving…" : "Offline — answers kept, will sync"}
+          {save === "saved" ? "All answers saved" : save === "saving" ? "Saving…" : `Offline — ${s.pendingCount()} ${s.pendingCount() === 1 ? "answer" : "answers"} kept on this computer, will sync`}
         </Badge>
         <div className="text-right">
           <p className="text-[10px] uppercase text-slate-500">Time remaining</p>

@@ -46,6 +46,12 @@ pub const MAX_IDENTIFICATION_ANSWER_LEN: usize = 500;
 pub const ANSWER_GRACE: Duration = Duration::from_secs(3);
 /// How often the server checks for sessions whose time has run out.
 pub const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+/// Most answers accepted in one `answers_sync` batch (a student who was offline for a while).
+pub const MAX_SYNC_BATCH: usize = 200;
+/// Per-connection message budget: above SOFT messages in a second extra ones are refused with
+/// `rate_limited`; above HARD the connection is closed. Normal use is a handful per second.
+pub const RATE_SOFT_PER_SECOND: u32 = 40;
+pub const RATE_HARD_PER_SECOND: u32 = 200;
 pub const DB_MAX_CONNECTIONS: u32 = 5;
 pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

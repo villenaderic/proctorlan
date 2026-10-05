@@ -46,7 +46,7 @@ When enabled, question order and (for multiple choice / multiple select) choice 
 One question at a time, navigator, progress bar, HH:MM:SS server clock (amber at 5 min, red at 1 min, spoken announcements for screen readers), "All answers saved / Saving… / Offline" badge, submit dialog that lists unanswered questions, paused and time-up banners.
 
 ## Reliability
-Answers get increasing sequence numbers. Unacknowledged answers stay queued and are resent after a reconnect or resume. **Not yet built (Phase 8):** persisting that queue across an app restart, and extra sync tests.
+Answers get increasing sequence numbers. Unacknowledged answers stay queued and are resent after a reconnect or resume. Persistence across restarts and batch upload are described in `docs/synchronization.md`.
 
 ## Verified
 - 16 real-socket engine tests, grading unit tests, TypeScript store run against the real server (`PROCTORLAN_INTEROP=1 npx vitest run tests/interop.test.ts`).

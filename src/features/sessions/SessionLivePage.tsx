@@ -10,7 +10,7 @@ import { sessionsApi } from "@/services/sessions";
 import { refreshAuth } from "@/stores/auth";
 import type { RosterRow, SessionAction, SessionSnapshot } from "@/types/session";
 import { formatClock } from "@/utils/format";
-import { STATUS_LABEL, allowedActions, displayRemaining } from "@/utils/sessionClock";
+import { STATUS_LABEL, allowedActions, displayRemaining, monotonicNow } from "@/utils/sessionClock";
 
 const POLL_MS = 2000;
 
@@ -19,8 +19,8 @@ export function SessionLivePage() {
   const [snap, setSnap] = useState<SessionSnapshot | null>(null);
   const [roster, setRoster] = useState<RosterRow[]>([]);
   const [toRemove, setToRemove] = useState<RosterRow | null>(null);
-  const [fetchedAt, setFetchedAt] = useState(() => Date.now());
-  const [now, setNow] = useState(() => Date.now());
+  const [fetchedAt, setFetchedAt] = useState(() => monotonicNow());
+  const [now, setNow] = useState(() => monotonicNow());
   const [error, setError] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -35,7 +35,7 @@ export function SessionLivePage() {
   const apply = useCallback((s: SessionSnapshot) => {
     if (!alive.current) return;
     setSnap(s);
-    setFetchedAt(Date.now());
+    setFetchedAt(monotonicNow());
     setError(null);
   }, []);
 
@@ -47,7 +47,7 @@ export function SessionLivePage() {
     };
     load();
     const poll = setInterval(load, POLL_MS);
-    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const tick = setInterval(() => setNow(monotonicNow()), 1000);
     return () => { alive.current = false; clearInterval(poll); clearInterval(tick); };
   }, [id, apply, fail]);
 

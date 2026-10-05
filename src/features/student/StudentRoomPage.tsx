@@ -8,16 +8,16 @@ import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useStudent } from "@/stores/student";
 import { formatClock } from "@/utils/format";
-import { displayRemaining } from "@/utils/sessionClock";
+import { displayRemaining, monotonicNow } from "@/utils/sessionClock";
 import { ExamPage } from "./ExamPage";
 
 /** Waiting room, plus the submitted / session-ended screens. The live exam is ExamPage. */
 export function StudentRoomPage() {
   const { phase, connection, info, status, remainingSeconds, receivedAt, leave, paper, submitted, autoSubmitted, result, examError } = useStudent();
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => monotonicNow());
   const [confirmLeave, setConfirmLeave] = useState(false);
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(monotonicNow()), 1000);
     return () => clearInterval(t);
   }, []);
   if (!info) return null;

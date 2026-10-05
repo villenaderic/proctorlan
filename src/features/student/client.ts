@@ -64,7 +64,7 @@ export interface ClientOptions {
 }
 
 /** Errors for which reconnecting would only repeat the failure. */
-const FATAL_CODES = new Set(["session_not_found", "session_closed", "already_joined", "invalid_identity", "too_many_attempts", "session_full", "removed", "hello_required"]);
+const FATAL_CODES = new Set(["session_not_found", "session_closed", "already_joined", "invalid_identity", "too_many_attempts", "session_full", "removed", "replaced", "hello_required"]);
 
 const defaultFactory: SocketFactory = (url) => new WebSocket(url) as unknown as SocketLike;
 
@@ -176,6 +176,7 @@ export class StudentClient {
       waiter.resolve(env);
       return;
     }
+    if (env.type === "replaced") return this.fail({ code: "replaced", message: "This exam was opened on another device or window, so this one was closed." });
     if (env.type === "removed") return this.fail({ code: "removed", message: "Your teacher removed you from this session. Ask them if you should join again." });
     if (env.type === "error" && FATAL_CODES.has(env.payload?.code)) return this.fail(env.payload as ClientFailure);
     if (env.type === "heartbeat_ack") return;

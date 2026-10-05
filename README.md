@@ -2,7 +2,7 @@
 
 Offline classroom exam proctoring over a local network. The teacher's computer hosts; student computers join with a session code. No internet, no cloud, no telemetry.
 
-**Status:** Phase 7 of 13 — exam engine done (question delivery, autosaved answers, server-side grading, submit, auto-submit at the deadline). See `docs/exam-engine.md`.
+**Status:** Phase 8 of 13 — synchronization done (offline answer queue saved to disk, batch upload, takeover of stale connections, flood protection). See `docs/synchronization.md`.
 
 ## Requirements
 - Node.js 20+ and npm

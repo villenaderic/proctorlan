@@ -220,7 +220,10 @@ pub async fn save_answer(db: &Database, session: &ExamSession, attempt_id: &str,
 pub async fn submit(db: &Database, session: &ExamSession, attempt_id: &str) -> Result<Option<ResultSummary>, EngineError> {
     let exam = db.get_exam_full(&session.exam_id).await.map_err(internal)?;
     let attempt = match db.finalize_attempt(attempt_id, AttemptStatus::Submitted, &exam).await.map_err(internal)? {
-        Some(a) => a,
+        Some(a) => {
+            let _ = db.record_proctor_event(attempt_id, ProctorEventType::Submission, "Submitted by the student", None).await;
+            a
+        }
         None => db.get_attempt(attempt_id).await.map_err(internal)?,
     };
     Ok(visible_result(&exam.exam, &attempt))
@@ -228,12 +231,23 @@ pub async fn submit(db: &Database, session: &ExamSession, attempt_id: &str) -> R
 
 /// Closes and grades every in-progress attempt (session end or time expiry) and tells each
 /// student's connection. Returns how many were finalised.
-pub async fn finalize_session_attempts(db: &Database, hub: &Hub, session: &ExamSession) -> Result<usize, AppError> {
+/// Why attempts are being closed on the student's behalf (recorded in the proctoring timeline).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoReason {
+    TimeExpired,
+    SessionEnded,
+}
+
+pub async fn finalize_session_attempts(db: &Database, hub: &Hub, session: &ExamSession, reason: AutoReason) -> Result<usize, AppError> {
     let exam = db.get_exam_full(&session.exam_id).await?;
     let mut n = 0;
     for a in db.list_in_progress_attempts(&session.id).await? {
         if let Some(done) = db.finalize_attempt(&a.id, AttemptStatus::AutoSubmitted, &exam).await? {
             n += 1;
+            let _ = match reason {
+                AutoReason::TimeExpired => db.record_proctor_event(&done.id, ProctorEventType::Timeout, "Time ran out; submitted automatically", None).await,
+                AutoReason::SessionEnded => db.record_proctor_event(&done.id, ProctorEventType::Submission, "Submitted automatically when the teacher ended the session", None).await,
+            };
             hub.publish(Envelope::new(
                 msg::SUBMITTED,
                 Some(&session.id),
@@ -258,7 +272,7 @@ pub async fn expire_due(db: &Database, hub: &Hub, notified: &mut HashSet<(String
         let exam = db.get_exam_full(&s.exam_id).await?;
         tracing::info!(session_id = %s.id, auto_submit = exam.exam.auto_submit, "time is up");
         if exam.exam.auto_submit {
-            finalize_session_attempts(db, hub, &s).await?;
+            finalize_session_attempts(db, hub, &s, AutoReason::TimeExpired).await?;
         }
         hub.publish(Envelope::new(msg::TIME_UP, Some(&s.id), json!({ "endsAt": s.ends_at, "autoSubmit": exam.exam.auto_submit, "serverTime": timer::format(Utc::now()) })));
     }

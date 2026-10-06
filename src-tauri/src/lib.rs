@@ -74,6 +74,7 @@ pub fn run() {
             commands::sessions::session_action,
             commands::sessions::list_session_roster,
             commands::sessions::remove_student,
+            commands::sessions::list_session_events,
             commands::network::network_info,
             commands::network::update_network,
         ])

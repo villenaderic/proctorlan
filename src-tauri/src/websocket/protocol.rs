@@ -32,6 +32,7 @@ pub mod client {
     pub const ANSWER: &str = "answer";
     pub const SUBMIT: &str = "submit";
     pub const ANSWERS_SYNC: &str = "answers_sync";
+    pub const PROCTOR_EVENT: &str = "proctor_event";
 }
 
 /// Message types the server sends.
@@ -44,6 +45,7 @@ pub mod server {
     pub const SUBMITTED: &str = "submitted";
     pub const TIME_UP: &str = "time_up";
     pub const ANSWERS_SYNCED: &str = "answers_synced";
+    pub const PROCTOR_ACK: &str = "proctor_ack";
     /// Another connection took over this student's attempt; this one is closed.
     pub const REPLACED: &str = "replaced";
     pub const HEARTBEAT_ACK: &str = "heartbeat_ack";

@@ -44,6 +44,8 @@ interface StudentState {
   submit(): Promise<boolean>;
   saveState(): SaveState;
   pendingCount(): number;
+  /** Reports a window-focus change to the teacher. Best effort: kept in memory and resent after a reconnect. */
+  reportFocus(type: "FOCUS_LOST" | "FOCUS_RESTORED", lostForMs?: number): void;
 }
 
 let client: StudentClient | null = null;
@@ -51,6 +53,10 @@ let attemptId: string | null = null;
 let retryTimer: ReturnType<typeof setInterval> | undefined;
 let socketFactory: SocketFactory | undefined;
 const nextSeq = createSequencer();
+/** Focus events not yet acknowledged, oldest first. In memory only: they are signals, not exam data. */
+let eventQueue: Array<{ type: "FOCUS_LOST" | "FOCUS_RESTORED"; lostForMs?: number }> = [];
+let sendingEvents = false;
+const MAX_QUEUED_EVENTS = 50;
 
 const blankExam = {
   paper: null, answers: {}, pending: {}, current: 0, timeUp: false, submitting: false,
@@ -124,11 +130,28 @@ export const useStudent = create<StudentState>((set, get) => {
     return flushing.then(() => Object.keys(get().pending).length === 0);
   }
 
+  /** Sends queued focus events in order; stops at the first failure and tries again later. */
+  async function flushEvents(): Promise<void> {
+    if (sendingEvents) return;
+    sendingEvents = true;
+    try {
+      while (eventQueue.length > 0 && client && get().connection === "online") {
+        const ev = eventQueue[0];
+        const r = await client.request("proctor_event", ev as Record<string, unknown>);
+        // proctor_ack, or a final "invalid_event" error: either way this one is done.
+        if (r.type !== "proctor_ack" && r.type !== "error") break;
+        eventQueue.shift();
+      }
+    } catch { /* offline or timed out: keep the queue */ }
+    sendingEvents = false;
+  }
+
   const startRetryLoop = () => {
     clearInterval(retryTimer);
     retryTimer = setInterval(() => {
       const s = get();
       if (s.connection === "online" && !s.submitted && Object.keys(s.pending).length > 0) void flushPending();
+      if (s.connection === "online" && eventQueue.length > 0) void flushEvents();
     }, RETRY_MS);
   };
   const stopRetryLoop = () => clearInterval(retryTimer);
@@ -140,9 +163,10 @@ export const useStudent = create<StudentState>((set, get) => {
     join(params) {
       client?.stop();
       attemptId = null;
+      eventQueue = [];
       set({ phase: "joining", error: null, connection: "connecting", info: null, ...blankExam });
       client = new StudentClient(params, {
-        onState: (connection) => set({ connection }),
+        onState: (connection) => { set({ connection }); if (connection === "online" && eventQueue.length > 0) void flushEvents(); },
         onJoined: (info: JoinedInfo) => {
           attemptId = info.attemptId;
           saveJoin({ host: params.host, port: params.port, sessionCode: params.sessionCode, studentName: info.studentName, studentId: info.studentId, token: info.token, examTitle: info.exam.title });
@@ -271,6 +295,14 @@ export const useStudent = create<StudentState>((set, get) => {
     },
 
     pendingCount() { return Object.keys(get().pending).length; },
+
+    reportFocus(type, lostForMs) {
+      const s = get();
+      if (!s.paper || s.submitted || s.timeUp) return;
+      if (eventQueue.length >= MAX_QUEUED_EVENTS) eventQueue.shift();
+      eventQueue.push(lostForMs === undefined ? { type } : { type, lostForMs });
+      void flushEvents();
+    },
   };
 });
 
@@ -282,6 +314,8 @@ export const __resetStudentForTests = (opts: { keepDisk?: boolean } = {}) => {
   stopRetryLoop();
   if (!opts.keepDisk) { if (attemptId) clearQueue(attemptId); }
   attemptId = null;
+  eventQueue = [];
+  sendingEvents = false;
   useStudent.setState({ phase: "form", connection: "stopped", info: null, error: null, ...blankExam });
 };
 function stopRetryLoop() { clearInterval(retryTimer); }

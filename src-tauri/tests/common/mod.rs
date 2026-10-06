@@ -45,9 +45,14 @@ pub fn four_type_exam() -> NewExam {
 }
 
 pub async fn harness() -> Harness {
+    harness_with_grace(Duration::from_millis(400)).await
+}
+
+/// `grace` is how long a student must stay gone before a DISCONNECTED event is recorded.
+pub async fn harness_with_grace(grace: Duration) -> Harness {
     let db = Database::open_in_memory().await.unwrap();
     let user = db.create_user("teacher", "hash", "Teacher", UserRole::Admin).await.unwrap();
-    let hub = Hub::new();
+    let hub = Hub::with_disconnect_grace(grace);
     let status = new_status();
     let lan = Arc::new(LanServer::new(db.clone(), hub.clone(), status.clone()));
     let st = lan.start(Ipv4Addr::LOCALHOST, 0, false).await.unwrap();
@@ -155,4 +160,11 @@ pub fn qid(paper: &Value, text: &str) -> String {
 pub fn cid(paper: &Value, question_text: &str, choice_text: &str) -> String {
     let q = paper["questions"].as_array().unwrap().iter().find(|q| q["text"].as_str().unwrap().contains(question_text)).unwrap();
     q["choices"].as_array().unwrap().iter().find(|c| c["text"] == choice_text).unwrap_or_else(|| panic!("no choice {choice_text}"))["id"].as_str().unwrap().to_string()
+}
+
+impl Ws {
+    pub async fn focus_lost(&mut self) -> Value { self.request("proctor_event", json!({ "type": "FOCUS_LOST" })).await }
+    pub async fn focus_restored(&mut self, lost_for_ms: i64) -> Value {
+        self.request("proctor_event", json!({ "type": "FOCUS_RESTORED", "lostForMs": lost_for_ms })).await
+    }
 }

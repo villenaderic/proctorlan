@@ -178,3 +178,35 @@ describe("answer sync (student store)", () => {
     expect(shown).toBeLessThanOrEqual(1800);
   });
 });
+
+describe("focus reporting (student store)", () => {
+  it("sends focus events to the server in order", async () => {
+    await joinAndOpen();
+    st().reportFocus("FOCUS_LOST");
+    st().reportFocus("FOCUS_RESTORED", 4000);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(server.events()).toEqual([{ type: "FOCUS_LOST" }, { type: "FOCUS_RESTORED", lostForMs: 4000 }]);
+  });
+
+  it("does not report before the exam is open or after it is submitted", async () => {
+    st().reportFocus("FOCUS_LOST");
+    await joinAndOpen();
+    await st().submit();
+    st().reportFocus("FOCUS_LOST");
+    await vi.advanceTimersByTimeAsync(20);
+    expect(server.events()).toEqual([]);
+  });
+
+  it("keeps events while the server is silent and delivers them once it answers again", async () => {
+    await joinAndOpen();
+    server.responding = false;
+    st().reportFocus("FOCUS_LOST");
+    await vi.advanceTimersByTimeAsync(9000); // request times out, event stays queued
+    server.responding = true;
+    await vi.advanceTimersByTimeAsync(15_000); // the stuck request times out, then the retry loop resends
+    expect(server.events().filter((e) => e.type === "FOCUS_LOST").length).toBeGreaterThanOrEqual(1);
+    const before = server.events().length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(server.events().length).toBe(before); // acknowledged: no further resends
+  });
+});

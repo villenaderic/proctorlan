@@ -1,6 +1,6 @@
 use super::{ids::*, Database};
 use crate::errors::AppResult;
-use crate::models::{ProctorEvent, ProctorEventType, Stats};
+use crate::models::{ProctorEvent, ProctorEventType, SessionEvent, Stats};
 
 impl Database {
     pub async fn get_setting(&self, key: &str) -> AppResult<Option<String>> {
@@ -29,7 +29,34 @@ impl Database {
     }
 
     pub async fn list_proctor_events(&self, attempt_id: &str) -> AppResult<Vec<ProctorEvent>> {
-        Ok(sqlx::query_as("SELECT * FROM proctor_events WHERE attempt_id = ? ORDER BY created_at").bind(attempt_id).fetch_all(&self.pool).await?)
+        Ok(sqlx::query_as("SELECT * FROM proctor_events WHERE attempt_id = ? ORDER BY created_at, rowid").bind(attempt_id).fetch_all(&self.pool).await?)
+    }
+
+    pub async fn count_proctor_events(&self, attempt_id: &str) -> AppResult<i64> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = ?").bind(attempt_id).fetch_one(&self.pool).await?)
+    }
+
+    /// Most recent event of any of the given types (e.g. to know whether the student is "away" right now).
+    pub async fn last_proctor_event(&self, attempt_id: &str, kinds: &[ProctorEventType]) -> AppResult<Option<ProctorEvent>> {
+        let marks = vec!["?"; kinds.len()].join(",");
+        let sql = format!("SELECT * FROM proctor_events WHERE attempt_id = ? AND event_type IN ({marks}) ORDER BY created_at DESC, rowid DESC LIMIT 1");
+        let mut q = sqlx::query_as(&sql).bind(attempt_id);
+        for k in kinds {
+            q = q.bind(*k);
+        }
+        Ok(q.fetch_optional(&self.pool).await?)
+    }
+
+    /// Newest first, capped, for the teacher's feed.
+    pub async fn list_session_events(&self, session_id: &str, limit: i64) -> AppResult<Vec<SessionEvent>> {
+        Ok(sqlx::query_as(
+            "SELECT e.id, e.attempt_id, s.name AS student_name, s.student_number, e.event_type, e.description, e.metadata, e.created_at
+             FROM proctor_events e
+             JOIN attempts a ON a.id = e.attempt_id
+             JOIN students s ON s.id = a.student_id
+             WHERE a.session_id = ?
+             ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?",
+        ).bind(session_id).bind(limit).fetch_all(&self.pool).await?)
     }
 
     pub async fn stats(&self) -> AppResult<Stats> {

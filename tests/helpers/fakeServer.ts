@@ -22,6 +22,7 @@ export class FakeServer {
   };
 
   get live() { return this.sockets.filter((s) => !s.closed); }
+  events() { return this.received.filter((m) => m.type === "proctor_event").map((m) => m.payload); }
   syncs() { return this.received.filter((m) => m.type === "answers_sync"); }
 
   handle(sock: FakeSock, msg: any) {
@@ -55,6 +56,7 @@ export class FakeServer {
         }),
       });
       case "submit": return reply("submitted", { attemptId: this.attemptId, auto: false, result: null });
+      case "proctor_event": return reply("proctor_ack", { recorded: true });
       case "heartbeat": return;
     }
   }

@@ -5,6 +5,7 @@ pub mod exam_validation;
 pub mod grading;
 pub mod join_service;
 pub mod network_service;
+pub mod proctoring;
 pub mod session_code;
 pub mod session_service;
 pub mod timer;

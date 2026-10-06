@@ -100,7 +100,10 @@ impl Database {
         Ok(sqlx::query_as(
             "SELECT a.id AS attempt_id, s.student_number, s.name, a.status, a.created_at AS joined_at, a.submitted_at,
                     (SELECT COUNT(*) FROM answers w WHERE w.attempt_id = a.id AND w.answer_data NOT IN ('\"\"', '[]')) AS answered,
-                    a.percentage, a.passed
+                    a.percentage, a.passed,
+                    (SELECT COUNT(*) FROM proctor_events p WHERE p.attempt_id = a.id AND p.event_type = 'FOCUS_LOST') AS focus_lost_count,
+                    (SELECT COALESCE(SUM(CAST(json_extract(p.metadata, '$.lostForMs') AS INTEGER)), 0) FROM proctor_events p WHERE p.attempt_id = a.id AND p.event_type = 'FOCUS_RESTORED') AS focus_lost_ms,
+                    (SELECT COUNT(*) FROM proctor_events p WHERE p.attempt_id = a.id AND p.event_type = 'DISCONNECTED') AS disconnect_count
              FROM attempts a JOIN students s ON s.id = a.student_id
              WHERE a.session_id = ? ORDER BY a.created_at, s.name",
         ).bind(session_id).fetch_all(&self.pool).await?)

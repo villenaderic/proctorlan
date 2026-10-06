@@ -19,6 +19,8 @@ pub struct Hub {
     /// attempt id -> (session id, live sockets). Only students who completed `join` appear here.
     online: Mutex<HashMap<String, (String, usize)>>,
     failures: Mutex<HashMap<IpAddr, (u32, Instant)>>,
+    /// How long a student must stay gone before a DISCONNECTED event is recorded.
+    disconnect_grace: Duration,
 }
 
 /// Held for the lifetime of one WebSocket connection; dropping it unregisters the client.
@@ -59,7 +61,16 @@ impl Drop for OnlineGuard {
 
 impl Hub {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self { events: broadcast::channel(256).0, clients: Mutex::default(), online: Mutex::default(), failures: Mutex::default() })
+        Self::with_disconnect_grace(config::disconnect_timeout())
+    }
+
+    /// Tests use a short grace so they do not wait for the real 20 seconds.
+    pub fn with_disconnect_grace(disconnect_grace: Duration) -> Arc<Self> {
+        Arc::new(Self { disconnect_grace, events: broadcast::channel(256).0, clients: Mutex::default(), online: Mutex::default(), failures: Mutex::default() })
+    }
+
+    pub fn disconnect_grace(&self) -> Duration {
+        self.disconnect_grace
     }
 
     pub fn connected(&self, session_id: &str) -> usize {

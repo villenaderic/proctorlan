@@ -22,3 +22,7 @@ You can save an unfinished exam as a draft. Before an exam can be **activated** 
 
 ### Locked exams
 Once an exam has been used in a session it can no longer be edited or deleted, so recorded results stay accurate. Use **Duplicate** to make a changed copy.
+
+## Watching a live exam (Phase 9)
+
+On the session page, the **Proctoring** column shows how often each student left the exam window or lost connection. The **Live events** list shows what happened and when; the clock button on a row opens that student's timeline. These are signals, not proof — see `docs/proctoring.md` for what they can and cannot tell you.

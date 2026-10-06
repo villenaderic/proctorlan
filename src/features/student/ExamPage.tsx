@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, Cloud, CloudOff, Pause, Send } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Eye, ChevronRight, Cloud, CloudOff, Pause, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { formatClock } from "@/utils/format";
 import { displayRemaining, monotonicNow } from "@/utils/sessionClock";
 import { answeredCount, isAnswered, timerAnnouncement, timerTone, unansweredIndexes } from "./paper";
 import { QuestionInput } from "./QuestionInput";
+import { useFocusMonitor } from "./useFocusMonitor";
 
 const TONE = { normal: "text-slate-900 dark:text-white", warning: "text-amber-600 dark:text-amber-400", danger: "text-red-600 dark:text-red-400" } as const;
 
@@ -22,6 +23,10 @@ export function ExamPage() {
   const [confirm, setConfirm] = useState(false);
   const spoken = useRef<string | null>(null);
   const [announce, setAnnounce] = useState("");
+  const [away, setAway] = useState<number | null>(null);
+
+  // Only while the exam is actually being taken; nothing is watched before it opens or after submit.
+  useFocusMonitor(!!paper && !s.submitted && !s.timeUp, (ms) => setAway(ms));
 
   useEffect(() => {
     const t = setInterval(() => setNow(monotonicNow()), 1000);
@@ -73,8 +78,17 @@ export function ExamPage() {
           <AlertTriangle className="h-4 w-4" aria-hidden /> Time is up. Answers are locked. Press Submit if your exam has not been submitted automatically.
         </p>
       )}
+      {away !== null && (
+        <p role="status" className="flex items-center justify-center gap-2 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <Eye className="h-4 w-4" aria-hidden /> You were away from the exam for {formatAway(away)}. Your teacher can see this.
+          <button className="underline" onClick={() => setAway(null)}>Dismiss</button>
+        </p>
+      )}
       {s.examError && <p role="alert" className="bg-red-50 px-4 py-2 text-center text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{s.examError}</p>}
 
+      <p className="px-4 pt-3 text-center text-xs text-slate-500">
+        Your teacher is notified if you leave this window during the exam, switch tabs or lose your connection. Stay on this screen until you submit.
+      </p>
       <div className="mx-auto grid w-full max-w-5xl flex-1 gap-4 p-4 md:grid-cols-[1fr_14rem]">
         <Card className="flex flex-col gap-5 p-6">
           <div className="flex items-center justify-between text-xs text-slate-500">
@@ -126,4 +140,10 @@ export function ExamPage() {
       </ConfirmDialog>
     </main>
   );
+}
+
+function formatAway(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${Math.max(1, s)} s`;
+  return `${Math.floor(s / 60)} min ${s % 60} s`;
 }

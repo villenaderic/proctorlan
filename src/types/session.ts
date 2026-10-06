@@ -61,4 +61,20 @@ export interface RosterRow {
   percentage: number | null;
   passed: boolean | null;
   online: boolean;
+  focusLostCount: number;
+  focusLostMs: number;
+  disconnectCount: number;
+}
+
+export type ProctorEventType = "FOCUS_LOST" | "FOCUS_RESTORED" | "DISCONNECTED" | "RECONNECTED" | "SUBMISSION" | "TIMEOUT";
+
+export interface SessionEvent {
+  id: string;
+  attemptId: string;
+  studentName: string;
+  studentNumber: string;
+  eventType: ProctorEventType;
+  description: string;
+  metadata: string | null;
+  createdAt: string;
 }

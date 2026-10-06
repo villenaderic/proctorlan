@@ -1,4 +1,4 @@
-import { Pause, Play, Square, UserMinus, Users, Wifi, WifiOff } from "lucide-react";
+import { History, Pause, Play, Square, UserMinus, Users, Wifi, WifiOff, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +8,9 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { isSessionExpired, toMessage } from "@/services/auth";
 import { sessionsApi } from "@/services/sessions";
 import { refreshAuth } from "@/stores/auth";
-import type { RosterRow, SessionAction, SessionSnapshot } from "@/types/session";
+import type { RosterRow, SessionAction, SessionEvent, SessionSnapshot } from "@/types/session";
 import { formatClock } from "@/utils/format";
+import { EVENT_LABEL, EVENT_TONE, flagsFor, sortForAttention, timelineFor } from "./proctoring";
 import { STATUS_LABEL, allowedActions, displayRemaining, monotonicNow } from "@/utils/sessionClock";
 
 const POLL_MS = 2000;
@@ -18,6 +19,8 @@ export function SessionLivePage() {
   const { id = "" } = useParams();
   const [snap, setSnap] = useState<SessionSnapshot | null>(null);
   const [roster, setRoster] = useState<RosterRow[]>([]);
+  const [events, setEvents] = useState<SessionEvent[]>([]);
+  const [focused, setFocused] = useState<string | null>(null);
   const [toRemove, setToRemove] = useState<RosterRow | null>(null);
   const [fetchedAt, setFetchedAt] = useState(() => monotonicNow());
   const [now, setNow] = useState(() => monotonicNow());
@@ -44,6 +47,7 @@ export function SessionLivePage() {
     const load = () => {
       sessionsApi.snapshot(id).then(apply).catch(fail);
       sessionsApi.roster(id).then((r) => alive.current && setRoster(r)).catch(fail);
+      sessionsApi.events(id).then((e) => alive.current && setEvents(e)).catch(fail);
     };
     load();
     const poll = setInterval(load, POLL_MS);
@@ -119,10 +123,10 @@ export function SessionLivePage() {
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500 dark:bg-navy-800 dark:text-slate-300">
-              <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Student ID</th><th className="px-4 py-2">Connection</th><th className="px-4 py-2">Progress</th><th className="px-4 py-2" /></tr>
+              <tr><th className="px-4 py-2">Name</th><th className="px-4 py-2">Student ID</th><th className="px-4 py-2">Connection</th><th className="px-4 py-2">Progress</th><th className="px-4 py-2">Proctoring</th><th className="px-4 py-2" /></tr>
             </thead>
             <tbody>
-              {roster.map((r) => (
+              {sortForAttention(roster).map((r) => (
                 <tr key={r.attemptId} className="border-t border-slate-200 dark:border-slate-700">
                   <td className="px-4 py-2 font-medium">{r.name}</td>
                   <td className="px-4 py-2 font-mono">{r.studentNumber}</td>
@@ -130,6 +134,13 @@ export function SessionLivePage() {
                     <Badge tone={r.online ? "green" : "amber"}>{r.online ? <Wifi className="h-3 w-3" aria-hidden /> : <WifiOff className="h-3 w-3" aria-hidden />}{r.online ? "Online" : "Disconnected"}</Badge>
                   </td>
                   <td className="px-4 py-2">{progressLabel(r, snap.questionCount)}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {flagsFor(r).map((f) => <Badge key={f.key} tone={f.tone}>{f.text}</Badge>)}
+                      {flagsFor(r).length === 0 && <span className="text-xs text-slate-400">—</span>}
+                      <Button size="sm" variant="outline" onClick={() => setFocused(focused === r.attemptId ? null : r.attemptId)} aria-label={`Timeline for ${r.name}`}><History className="h-3.5 w-3.5" aria-hidden /></Button>
+                    </div>
+                  </td>
                   <td className="px-4 py-2 text-right">
                     {r.status === "JOINED" && !ended && (
                       <Button size="sm" variant="outline" onClick={() => setToRemove(r)} aria-label={`Remove ${r.name}`}><UserMinus className="h-3.5 w-3.5" aria-hidden /> Remove</Button>
@@ -142,8 +153,34 @@ export function SessionLivePage() {
         )}
       </Card>
 
+      {focused && (() => {
+        const who = roster.find((r) => r.attemptId === focused);
+        const line = timelineFor(events, focused);
+        return (
+          <Card className="overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+              <h2 className="font-medium">Timeline — {who?.name ?? "student"}</h2>
+              <Button size="sm" variant="outline" onClick={() => setFocused(null)} aria-label="Close timeline"><X className="h-3.5 w-3.5" aria-hidden /></Button>
+            </div>
+            {line.length === 0
+              ? <p className="p-4 text-sm text-slate-600 dark:text-slate-300">Nothing recorded for this student.</p>
+              : <ol className="divide-y divide-slate-200 text-sm dark:divide-slate-700">{line.map((e) => <EventRow key={e.id} e={e} />)}</ol>}
+          </Card>
+        );
+      })()}
+
+      <Card className="overflow-hidden">
+        <h2 className="border-b border-slate-200 px-4 py-3 font-medium dark:border-slate-700">Live events</h2>
+        {events.length === 0
+          ? <p className="p-4 text-sm text-slate-600 dark:text-slate-300">No events yet. Leaving the exam window, disconnecting and submitting show up here.</p>
+          : <ol className="max-h-72 divide-y divide-slate-200 overflow-auto text-sm dark:divide-slate-700" aria-live="off">{events.slice(0, 100).map((e) => <EventRow key={e.id} e={e} withName />)}</ol>}
+        <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700">
+          These are signals, not proof of cheating. A student can be away for innocent reasons, and this cannot see other devices or notes.
+        </p>
+      </Card>
+
       <p className="text-sm text-slate-600 dark:text-slate-300">
-        {snap.questionCount} questions · passing score {snap.passingScore}%. Live proctoring events arrive in Phase 9.
+        {snap.questionCount} questions · passing score {snap.passingScore}%.
       </p>
 
       <ConfirmDialog open={!!toRemove} danger title={`Remove ${toRemove?.name ?? "student"}?`} confirmLabel="Remove"
@@ -177,5 +214,17 @@ function Stat({ label, value, icon }: { label: string; value: number; icon?: boo
       <p className="flex items-center gap-1 text-xs uppercase text-slate-500">{icon && <Users className="h-3.5 w-3.5" aria-hidden />}{label}</p>
       <p className="text-3xl font-semibold">{value}</p>
     </Card>
+  );
+}
+
+function EventRow({ e, withName }: { e: SessionEvent; withName?: boolean }) {
+  const time = new Date(e.createdAt);
+  return (
+    <li className="flex flex-wrap items-center gap-2 px-4 py-2">
+      <span className="w-20 font-mono text-xs text-slate-500">{Number.isNaN(time.getTime()) ? e.createdAt : time.toLocaleTimeString()}</span>
+      <Badge tone={EVENT_TONE[e.eventType]}>{EVENT_LABEL[e.eventType]}</Badge>
+      {withName && <span className="font-medium">{e.studentName}</span>}
+      <span className="text-slate-600 dark:text-slate-300">{e.description}</span>
+    </li>
   );
 }

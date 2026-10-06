@@ -107,7 +107,7 @@ impl SessionService {
 
         // Ending closes and grades everyone still working, before students hear the session is over.
         if action == SessionAction::End {
-            let n = exam_engine::finalize_session_attempts(&self.db, &self.hub, &after).await?;
+            let n = exam_engine::finalize_session_attempts(&self.db, &self.hub, &after, exam_engine::AutoReason::SessionEnded).await?;
             tracing::info!(session_id = %id, auto_submitted = n, "session ended");
         }
 
@@ -151,6 +151,11 @@ impl SessionService {
             server_time: timer::format(now),
             row,
         })
+    }
+
+    /// Newest-first proctoring feed for the teacher (capped).
+    pub async fn events(&self, id: &str) -> AppResult<Vec<SessionEvent>> {
+        self.db.list_session_events(id, 500).await
     }
 
     pub async fn roster(&self, id: &str) -> AppResult<Vec<RosterRow>> {

@@ -317,6 +317,24 @@ pub struct RosterRow {
     pub answered: i64,
     pub percentage: Option<f64>,
     pub passed: Option<bool>,
+    /// Proctoring summary (see services/proctoring.rs).
+    pub focus_lost_count: i64,
+    pub focus_lost_ms: i64,
+    pub disconnect_count: i64,
     #[sqlx(skip)]
     pub online: bool,
+}
+
+/// A proctoring event with the student's identity, for the teacher's live feed.
+#[derive(Debug, Clone, Serialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEvent {
+    pub id: String,
+    pub attempt_id: String,
+    pub student_name: String,
+    pub student_number: String,
+    pub event_type: ProctorEventType,
+    pub description: String,
+    pub metadata: Option<String>,
+    pub created_at: String,
 }

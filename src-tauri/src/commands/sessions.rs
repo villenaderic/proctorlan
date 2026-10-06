@@ -3,7 +3,7 @@
 use tauri::State;
 
 use crate::errors::AppResult;
-use crate::models::{RosterRow, SessionRow};
+use crate::models::{RosterRow, SessionEvent, SessionRow};
 use crate::services::auth_service::AuthService;
 use crate::services::session_service::{SessionAction, SessionService, SessionSnapshot};
 
@@ -41,4 +41,10 @@ pub async fn list_session_roster(auth: State<'_, AuthService>, svc: State<'_, Se
 pub async fn remove_student(auth: State<'_, AuthService>, svc: State<'_, SessionService>, attempt_id: String) -> AppResult<()> {
     let user = auth.require_user().await?;
     svc.remove_student(&user, &attempt_id).await
+}
+
+#[tauri::command]
+pub async fn list_session_events(auth: State<'_, AuthService>, svc: State<'_, SessionService>, id: String) -> AppResult<Vec<SessionEvent>> {
+    auth.require_user().await?;
+    svc.events(&id).await
 }

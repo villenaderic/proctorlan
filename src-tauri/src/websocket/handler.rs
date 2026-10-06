@@ -16,6 +16,7 @@ use crate::server::hub::OnlineGuard;
 use crate::server::AppState;
 use crate::services::exam_engine::{self, EngineError};
 use crate::services::join_service::{self, JoinError};
+use crate::services::proctoring;
 use crate::services::timer;
 use crate::websocket::limiter::{RateLimiter, Verdict};
 use crate::websocket::protocol::{client, parse_frame, server as msg, Envelope};
@@ -127,6 +128,7 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
     // Set once this connection has joined as a student; the guard marks them online.
     let mut joined: Option<(String, OnlineGuard)> = None;
     let conn_id = new_id();
+    let mut taken_over = false;
     let mut limiter = RateLimiter::new(config::RATE_SOFT_PER_SECOND, config::RATE_HARD_PER_SECOND, std::time::Instant::now());
 
     loop {
@@ -171,7 +173,7 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                         let reply = handle_join(&st, &session, &env, &mut joined, &conn_id).await;
                         if !send(&mut socket, &reply).await { break; }
                     }
-                    client::START_EXAM | client::ANSWER | client::SUBMIT | client::ANSWERS_SYNC => {
+                    client::START_EXAM | client::ANSWER | client::SUBMIT | client::ANSWERS_SYNC | client::PROCTOR_EVENT => {
                         let reply = match joined.as_ref() {
                             None => Envelope::reply(msg::ERROR, &env, Some(&session.id), json!({ "code": "join_required", "message": "Join the session first." })),
                             Some((attempt_id, _)) => handle_exam_message(&st, &session.id, attempt_id, &env).await,
@@ -193,6 +195,7 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
                         if e.payload["connId"].as_str() != Some(conn_id.as_str()) {
                             let _ = send(&mut socket, &Envelope::new(msg::REPLACED, Some(&session.id), json!({ "attemptId": e.payload["attemptId"] }))).await;
                             close_with(&mut socket, CLOSE_POLICY, "replaced").await;
+                            taken_over = true;
                             break;
                         }
                     } else if mine {
@@ -233,6 +236,11 @@ pub async fn handle_socket(mut socket: WebSocket, st: AppState, ip: IpAddr) {
         }
     }
     tracing::info!(session_id = %session.id, %ip, "client disconnected");
+    // A student who stays gone past the grace period gets a DISCONNECTED event; a takeover is not a disconnect.
+    if let (Some((attempt_id, guard)), false) = (joined.take(), taken_over) {
+        drop(guard);
+        tokio::spawn(proctoring::after_disconnect(st.db.clone(), st.hub.clone(), attempt_id, session.id.clone()));
+    }
 }
 
 /// Handles `join {studentName, studentId, token?}`. Never reveals questions or answers.
@@ -257,6 +265,11 @@ async fn handle_join(st: &AppState, session: &ExamSession, env: &Envelope, joine
         Ok(e) => e,
         Err(_) => return err(JoinError::Internal),
     };
+    if outcome.new_token.is_none() {
+        if let Err(e) = proctoring::on_rejoin(&st.db, &outcome.attempt.id).await {
+            tracing::error!(error = %e, "could not record reconnect");
+        }
+    }
     *joined = Some((outcome.attempt.id.clone(), st.hub.mark_online(&outcome.attempt.id, &session.id)));
     // If this attempt is already open on another connection (stale socket, second window), that one yields.
     st.hub.publish(Envelope::new(msg::REPLACED, Some(&session.id), json!({ "attemptId": outcome.attempt.id, "connId": conn_id })));
@@ -318,6 +331,22 @@ async fn handle_exam_message(st: &AppState, session_id: &str, attempt_id: &str, 
             }
         }
         client::ANSWERS_SYNC => sync_answers(st, &session, attempt_id, env).await,
+        client::PROCTOR_EVENT => {
+            let kind = env.payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match proctoring::parse_client_kind(kind) {
+                Err(_) => Envelope::reply(msg::ERROR, env, Some(session_id), json!({ "code": "invalid_event", "message": "Unknown event type." })),
+                Ok(k) => {
+                    let lost = env.payload.get("lostForMs").and_then(|v| v.as_i64());
+                    match proctoring::record_client_event(&st.db, &session, attempt_id, k, lost).await {
+                        Ok(recorded) => Envelope::reply(msg::PROCTOR_ACK, env, Some(session_id), json!({ "recorded": recorded })),
+                        Err(e) => {
+                            tracing::error!(error = %e, "could not record proctor event");
+                            fail(EngineError::Internal)
+                        }
+                    }
+                }
+            }
+        }
         _ => match exam_engine::submit(&st.db, &session, attempt_id).await {
             Ok(result) => Envelope::reply(msg::SUBMITTED, env, Some(session_id), json!({ "attemptId": attempt_id, "auto": false, "result": result })),
             Err(e) => fail(e),

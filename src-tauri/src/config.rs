@@ -52,6 +52,10 @@ pub const MAX_SYNC_BATCH: usize = 200;
 /// `rate_limited`; above HARD the connection is closed. Normal use is a handful per second.
 pub const RATE_SOFT_PER_SECOND: u32 = 40;
 pub const RATE_HARD_PER_SECOND: u32 = 200;
+/// Proctoring limits.
+pub const MAX_EVENTS_PER_ATTEMPT: i64 = 1_000;
+/// A single "away from the exam window" period longer than this is clamped (a clock bug, not reality).
+pub const MAX_FOCUS_LOST_MS: i64 = 24 * 60 * 60 * 1000;
 pub const DB_MAX_CONNECTIONS: u32 = 5;
 pub const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 

@@ -97,11 +97,15 @@ describe.skipIf(!enabled)("StudentClient ↔ Rust server", () => {
     await until(() => Object.keys(st().pending).length === 0); // both acknowledged by the server
     expect(st().saveState()).toBe("saved");
 
+    st().reportFocus("FOCUS_LOST");
+    st().reportFocus("FOCUS_RESTORED", 3000);
+    await new Promise((r) => setTimeout(r, 300));
+
     expect(await st().submit()).toBe(true);
     expect(st().submitted).toBe(true);
     expect(st().result).toMatchObject({ score: 2, totalPoints: 2, percentage: 100, passed: true });
     const roster = await command("roster");
-    expect(roster[0]).toMatchObject({ studentNumber: "S-1", status: "SUBMITTED", percentage: 100, passed: true, answered: 2 });
+    expect(roster[0]).toMatchObject({ studentNumber: "S-1", status: "SUBMITTED", percentage: 100, passed: true, answered: 2, focusLostCount: 1, focusLostMs: 3000 });
     __resetStudentForTests();
   }, 30_000);
 

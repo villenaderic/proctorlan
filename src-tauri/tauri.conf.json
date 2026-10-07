@@ -11,7 +11,14 @@
   },
   "app": {
     "windows": [
-      { "title": "ProctorLAN", "width": 1200, "height": 780, "minWidth": 960, "minHeight": 640, "resizable": true }
+      {
+        "title": "ProctorLAN",
+        "width": 1200,
+        "height": 780,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true
+      }
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost http://*:* ws://*:*"
@@ -20,6 +27,34 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "category": "Education",
+    "shortDescription": "Offline LAN classroom exam proctoring",
+    "longDescription": "ProctorLAN runs exams on a classroom network with no internet. The teacher's computer hosts the exam, grades it, and shows live progress; students join from the same app.",
+    "copyright": "Copyright (c) ProctorLAN contributors",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "both",
+        "installerHooks": "windows/hooks.nsh",
+        "displayLanguageSelector": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "section": "education"
+      }
+    }
   }
 }

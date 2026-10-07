@@ -1,0 +1,48 @@
+name: Release
+# Builds installers for Windows, macOS and Linux when a version tag such as v1.0.0 is pushed.
+# The result is a DRAFT GitHub release: review it, then publish. Installers are unsigned (see docs/packaging.md).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, args: "" }
+          - { os: macos-latest, args: "--target universal-apple-darwin" }
+          - { os: ubuntu-22.04, args: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - name: Linux system libraries for Tauri
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev libxdo-dev
+      - run: npm ci
+      - run: node scripts/check-version.mjs
+      - run: npm test
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "ProctorLAN ${{ github.ref_name }}"
+          releaseBody: "Unsigned installers. See docs/packaging.md for the first-run warnings on Windows and macOS."
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

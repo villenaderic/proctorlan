@@ -53,3 +53,6 @@ mDNS on real networks, and Windows Firewall prompts (first run may ask to allow 
 ## Verified in Phase 6
 - The TypeScript student client was run against the real Rust server (`PROCTORLAN_INTEROP=1 npx vitest run tests/interop.test.ts`, which spawns `cargo run --example dev_server`): join, session_started push, impostor refusal, rejoin by token, session_ended.
 - **Not verified:** the student screens visually, and the Tauri WebView on Windows/macOS/Linux opening `ws://` to another machine (the CSP allows it; needs a two-computer test).
+
+## Firewall
+The Windows installer adds an inbound rule for ProctorLAN on Private and Domain networks. If students cannot connect and the teacher's own machine works on `127.0.0.1`, the firewall is the usual cause: check that the Wi-Fi is classed *Private*, that the rule "ProctorLAN" exists (Windows Defender Firewall → Inbound rules), or allow the port with `sudo ufw allow 38123/tcp` on Linux. Details: `packaging.md`.

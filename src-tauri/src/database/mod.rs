@@ -12,6 +12,7 @@ mod attempts;
 mod exams;
 pub mod ids;
 mod misc;
+mod results;
 mod sessions;
 mod users;
 

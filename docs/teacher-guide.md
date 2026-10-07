@@ -26,3 +26,11 @@ Once an exam has been used in a session it can no longer be edited or deleted, s
 ## Watching a live exam (Phase 9)
 
 On the session page, the **Proctoring** column shows how often each student left the exam window or lost connection. The **Live events** list shows what happened and when; the clock button on a row opens that student's timeline. These are signals, not proof — see `docs/proctoring.md` for what they can and cannot tell you.
+
+## Results and export (Phase 10)
+
+After a session, open **Results**, pick the session, and review scores, charts and the question analysis. Click a student to see their answers next to the correct ones. **Export CSV** saves a spreadsheet file and shows where it was saved. See `docs/results.md`.
+
+## Backups and sharing exams (Phase 11)
+
+Open **Backups** and press **Create backup now** before an important exam, and keep a copy on a USB drive. Automatic backups are on by default. To move or share a single exam, use the download icon in **Exams** and **Import exam** on the other computer. See `docs/backup.md`.

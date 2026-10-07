@@ -1,4 +1,4 @@
-import { Copy, Eye, Pencil, Plus, Power, PowerOff, Trash2 } from "lucide-react";
+import { Copy, Download, Eye, Pencil, Plus, Upload, Power, PowerOff, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { isSessionExpired, toMessage } from "@/services/auth";
+import { backupApi } from "@/services/backup";
 import { examsApi } from "@/services/exams";
+import { cleanPath, looksAbsolute } from "@/features/backups/format";
 import { refreshAuth } from "@/stores/auth";
 import type { ExamSummary } from "@/types/exam";
 import { formatDate } from "@/utils/format";
@@ -21,6 +23,8 @@ export function ExamsPage() {
   const [banner, setBanner] = useState<Banner>(initialNotice ? { kind: "ok", text: initialNotice } : null);
   const [toDelete, setToDelete] = useState<ExamSummary | null>(null);
   const [query, setQuery] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importPath, setImportPath] = useState("");
 
   const fail = useCallback((e: unknown) => {
     const text = toMessage(e);
@@ -44,8 +48,22 @@ export function ExamsPage() {
           <h1 className="text-2xl font-semibold">Exams</h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">Create, edit and prepare exams for your sessions.</p>
         </div>
-        <Button onClick={() => nav("/teacher/exams/new")}><Plus className="h-4 w-4" aria-hidden /> Create exam</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setImporting((v) => !v)} aria-expanded={importing}><Upload className="h-4 w-4" aria-hidden /> Import exam</Button>
+          <Button onClick={() => nav("/teacher/exams/new")}><Plus className="h-4 w-4" aria-hidden /> Create exam</Button>
+        </div>
       </header>
+
+      {importing && (
+        <Card className="space-y-2 p-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">Paste the full path to an exam file (<span className="font-mono">.json</span>) exported from ProctorLAN. It is added as a new, inactive exam; nothing is overwritten.</p>
+          <div className="flex flex-wrap gap-2">
+            <input aria-label="Path to exam file" value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="e.g. E:\Exams\exam-midterm.json"
+              className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-sm dark:border-slate-600 dark:bg-navy-950" />
+            <Button disabled={!looksAbsolute(importPath)} onClick={() => run(async () => { const x = await backupApi.importExam(cleanPath(importPath)); setImportPath(""); setImporting(false); return x; }, "Exam imported. It is inactive until you activate it.")}>Import</Button>
+          </div>
+        </Card>
+      )}
 
       {banner && (
         <p role={banner.kind === "error" ? "alert" : "status"}
@@ -85,6 +103,8 @@ export function ExamsPage() {
                       <div className="flex justify-end gap-1">
                         <Link to={`/teacher/exams/${e.id}/preview`} aria-label={`Preview ${e.title}`} className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-200/70 dark:hover:bg-navy-800"><Eye className="h-4 w-4" /></Link>
                         <Button size="icon" variant="ghost" aria-label={locked ? `${e.title} is locked: it has sessions` : `Edit ${e.title}`} title={locked ? "Has sessions: duplicate it to make changes" : "Edit"} onClick={() => nav(`/teacher/exams/${e.id}/edit`)}><Pencil className="h-4 w-4" /></Button>
+                        <Button size="icon" variant="ghost" aria-label={`Export ${e.title} to a file`} title="Export to file (includes the answer key)"
+                          onClick={async () => { try { const x = await backupApi.exportExam(e.id); setBanner({ kind: "ok", text: `Exported to ${x.path}` }); } catch (err) { fail(err); } }}><Download className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" aria-label={`Duplicate ${e.title}`} title="Duplicate" onClick={() => run(() => examsApi.duplicate(e.id), `Duplicated "${e.title}".`)}><Copy className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" aria-label={e.status === "active" ? `Deactivate ${e.title}` : `Activate ${e.title}`} title={e.status === "active" ? "Deactivate" : "Activate"}
                           onClick={() => run(() => examsApi.setActive(e.id, e.status !== "active"), e.status === "active" ? `"${e.title}" is now inactive.` : `"${e.title}" is now active.`)}>

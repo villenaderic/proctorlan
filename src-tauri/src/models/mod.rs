@@ -4,6 +4,11 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+mod backup;
+mod results;
+pub use backup::*;
+pub use results::*;
+
 macro_rules! text_enum {
     ($(#[$m:meta])* $name:ident, $rule:literal, { $($variant:ident),+ $(,)? }) => {
         $(#[$m])*
@@ -131,14 +136,14 @@ pub struct ExamFull {
     pub session_count: i64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewChoice {
     pub choice_text: String,
     pub is_correct: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewQuestion {
     pub question_text: String,
@@ -151,7 +156,7 @@ pub struct NewQuestion {
     pub choices: Vec<NewChoice>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewExam {
     pub title: String,

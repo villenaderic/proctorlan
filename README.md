@@ -2,7 +2,7 @@
 
 Offline classroom exam proctoring over a local network. The teacher's computer hosts; student computers join with a session code. No internet, no cloud, no telemetry.
 
-**Status:** Phase 9 of 13 — proctoring done (focus-loss and disconnect signals, live feed and per-student timeline; signals only, never penalties). See `docs/proctoring.md` and `docs/synchronization.md`.
+**Status:** Phase 11 of 13 — backup and restore done (verified snapshots, automatic backups, safe staged restore, exam import/export). See `docs/backup.md`, `docs/results.md`, `docs/proctoring.md`.
 
 ## Requirements
 - Node.js 20+ and npm

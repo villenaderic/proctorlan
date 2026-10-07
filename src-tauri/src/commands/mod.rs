@@ -1,8 +1,10 @@
 //! Tauri commands exposed to the React frontend.
 
 pub mod auth;
+pub mod backup;
 pub mod exams;
 pub mod network;
+pub mod results;
 pub mod sessions;
 
 use serde::Serialize;

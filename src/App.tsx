@@ -9,7 +9,11 @@ import { ExamBuilderPage } from "@/features/exams/ExamBuilderPage";
 import { ExamPreviewPage } from "@/features/exams/ExamPreviewPage";
 import { SessionsPage } from "@/features/sessions/SessionsPage";
 import { SessionLivePage } from "@/features/sessions/SessionLivePage";
-import { SectionPlaceholder } from "@/pages/teacher/SectionPlaceholder";
+import { ResultsPage } from "@/features/results/ResultsPage";
+import { SessionResultsPage } from "@/features/results/SessionResultsPage";
+import { AttemptDetailPage } from "@/features/results/AttemptDetailPage";
+import { StudentsPage } from "@/features/results/StudentsPage";
+import { BackupsPage } from "@/features/backups/BackupsPage";
 
 // HashRouter: works from Tauri's bundled assets without server-side routing.
 export default function App() {
@@ -25,9 +29,11 @@ export default function App() {
           <Route path="exams/:id/preview" element={<ExamPreviewPage />} />
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="sessions/:id" element={<SessionLivePage />} />
-          <Route path="students" element={<SectionPlaceholder title="Students" phase="Phase 10 (Results)" />} />
-          <Route path="results" element={<SectionPlaceholder title="Results" phase="Phase 10 (Results)" />} />
-          <Route path="backups" element={<SectionPlaceholder title="Backups" phase="Phase 11 (Backup/Export)" />} />
+          <Route path="students" element={<StudentsPage />} />
+          <Route path="results" element={<ResultsPage />} />
+          <Route path="results/attempt/:attemptId" element={<AttemptDetailPage />} />
+          <Route path="results/:id" element={<SessionResultsPage />} />
+          <Route path="backups" element={<BackupsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="/student" element={<StudentPage />} />

@@ -28,6 +28,12 @@ pub fn run() {
             use tauri::Manager;
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
+            // A restore staged in the previous run is applied now, before the database is opened.
+            match tauri::async_runtime::block_on(services::backup_service::apply_pending_restore(&dir)) {
+                Ok(true) => tracing::info!("a staged backup restore was applied"),
+                Ok(false) => {}
+                Err(e) => tracing::error!(error = %e, "could not apply the staged restore"),
+            }
             let db_path = dir.join(config::DB_FILE_NAME);
             tracing::info!(path = %db_path.display(), "opening database");
             let db = tauri::async_runtime::block_on(database::Database::open(&db_path))?;
@@ -44,6 +50,15 @@ pub fn run() {
                     tracing::warn!(error = %e, "LAN server did not start");
                 }
             });
+            let backups = services::backup_service::BackupService::new(db.clone(), dir.clone());
+            match tauri::async_runtime::block_on(backups.auto_backup_if_due()) {
+                Ok(Some(b)) => tracing::info!(file = %b.file_name, "automatic backup created"),
+                Ok(None) => {}
+                Err(e) => tracing::warn!(error = %e, "automatic backup failed"),
+            }
+            app.manage(backups);
+            app.manage(services::exam_transfer::ExamTransfer::new(db.clone(), dir.join("exports")));
+            app.manage(services::results_service::ResultsService::new(db.clone(), dir.join("exports")));
             app.manage(services::session_service::SessionService::new(db.clone(), hub, status));
             app.manage(network);
             app.manage(lan);
@@ -75,6 +90,21 @@ pub fn run() {
             commands::sessions::list_session_roster,
             commands::sessions::remove_student,
             commands::sessions::list_session_events,
+            commands::backup::backup_overview,
+            commands::backup::create_backup,
+            commands::backup::delete_backup,
+            commands::backup::stage_restore,
+            commands::backup::cancel_restore,
+            commands::backup::set_auto_backup,
+            commands::backup::restart_app,
+            commands::backup::export_exam_file,
+            commands::backup::import_exam_file,
+            commands::results::list_result_sessions,
+            commands::results::get_session_results,
+            commands::results::get_attempt_detail,
+            commands::results::export_session_csv,
+            commands::results::list_students,
+            commands::results::get_student_history,
             commands::network::network_info,
             commands::network::update_network,
         ])

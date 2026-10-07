@@ -77,6 +77,7 @@ export function SessionLivePage() {
           <Link to="/teacher/sessions" className="text-sm text-brand-600 underline">← All sessions</Link>
           <h1 className="text-2xl font-semibold">{snap.examTitle}</h1>
         </div>
+        {ended && <Link to={`/teacher/results/${snap.id}`} className="text-sm font-medium text-brand-600 underline">View results →</Link>}
         <Badge tone={snap.status === "RUNNING" ? "green" : snap.status === "PAUSED" ? "amber" : ended ? "gray" : "blue"}>{STATUS_LABEL[snap.status]}</Badge>
       </header>
 

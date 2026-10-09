@@ -46,7 +46,7 @@ App data (database, backups, exports) lives in the operating-system app-data fol
 
 ## What was verified, and what was not
 Verified on Linux (Ubuntu-based build machine, headless X server):
-- `npm run tauri:build -- --bundles deb` produces `ProctorLAN_0.1.0_amd64.deb` (about 4 MB) with the binary, desktop entry and icons.
+- `npm run tauri:build -- --bundles deb` produces `ProctorLAN_1.0.0_amd64.deb` (about 4 MB) with the binary, desktop entry and icons.
 - The release binary starts in a real WebKitGTK window, creates its database under the `app.proctorlan.desktop` data folder, applies migrations, and serves `GET /api/health` on the LAN port.
 - Through the real window: the Welcome screen, first-run administrator setup (Argon2 in Rust), the Dashboard, and **Create backup now** (a verified `.db` appears in the backups list).
 

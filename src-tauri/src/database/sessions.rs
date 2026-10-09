@@ -7,6 +7,9 @@ use crate::services::{session_code, timer};
 
 const CODE_ATTEMPTS: usize = 10;
 
+/// status, started_at, ends_at, paused_at, paused_total_seconds, exam duration (minutes)
+type SessionTimes = (SessionStatus, Option<String>, Option<String>, Option<String>, i64, i64);
+
 impl Database {
     /// Creates a session in CREATED state with a fresh code that is unique among open sessions.
     pub async fn create_session(&self, exam_id: &str, host_ip: &str, host_port: u16) -> AppResult<ExamSession> {
@@ -71,7 +74,7 @@ impl Database {
     /// (start sets the deadline, pause freezes it, resume pushes it back) in one transaction.
     pub async fn transition_session_at(&self, id: &str, next: SessionStatus, now: DateTime<Utc>) -> AppResult<ExamSession> {
         let mut tx = self.pool.begin().await?;
-        let row: Option<(SessionStatus, Option<String>, Option<String>, Option<String>, i64, i64)> = sqlx::query_as(
+        let row: Option<SessionTimes> = sqlx::query_as(
             "SELECT s.status, s.started_at, s.ends_at, s.paused_at, s.paused_total_seconds, e.duration_minutes
                FROM exam_sessions s JOIN exams e ON e.id = s.exam_id WHERE s.id = ?",
         ).bind(id).fetch_optional(&mut *tx).await?;

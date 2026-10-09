@@ -271,7 +271,7 @@ impl BackupService {
         if s.exams + s.students + s.completed_attempts == 0 {
             return Ok(None);
         }
-        let newest = self.list().await?.into_iter().filter(|b| b.kind == "manual" || b.kind == "auto").next();
+        let newest = self.list().await?.into_iter().find(|b| b.kind == "manual" || b.kind == "auto");
         let due = match newest {
             None => true,
             Some(b) => DateTime::parse_from_rfc3339(&b.created_at).map(|t| Utc::now() - t.with_timezone(&Utc) >= ChronoDuration::hours(AUTO_INTERVAL_HOURS)).unwrap_or(true),

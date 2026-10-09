@@ -16,5 +16,7 @@
 - Whoever has physical/OS-level access to the teacher's computer can read the SQLite file. The app does not encrypt data at rest.
 - The password policy is length-based (8–128 chars), following current NIST guidance; it does not check against breached-password lists (needs internet).
 
-## Planned (later phases)
-Student attempt tokens + LAN request validation (Phase 5–6), payload size limits and WebSocket validation (Phase 5/8), answer keys never sent to students (Phase 6), full security test list (Phase 13).
+## Phase 13 review
+Automated (`src-tauri/tests/security.rs`, all passing): only `/api/health`, `/api/sessions/lookup`, `/ws` are served; teacher routes unreachable over LAN; student tokens are session-bound and stored hashed; SQL/HTML/script payloads stored as text; extra JSON fields (e.g. score) ignored; no answer key in any student payload before or after submit; hashes/tokens never serialised; oversized or malformed identities rejected. Also: `npm audit` 0 vulnerabilities, clippy clean.
+
+Not covered: TLS on the LAN (plain HTTP/WS), network-level attacks (ARP spoofing, flooding beyond the 100-student cap), OS-level tampering, third-party penetration test. See `docs/known-limitations.md`.

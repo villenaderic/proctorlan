@@ -70,12 +70,12 @@ mod tests {
 
     #[test]
     fn disconnect_needs_more_than_one_missed_beat() {
-        assert!(HEARTBEAT_MISSES_BEFORE_DISCONNECT > 1);
+        const _: () = assert!(HEARTBEAT_MISSES_BEFORE_DISCONNECT > 1);
         assert!(disconnect_timeout() > HEARTBEAT_INTERVAL);
     }
 
     #[test]
     fn port_is_unprivileged() {
-        assert!(DEFAULT_PORT > 1024);
+        const _: () = assert!(DEFAULT_PORT > 1024);
     }
 }

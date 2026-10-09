@@ -4,6 +4,7 @@
 //! - multiple_choice / true_false: a choice id string, e.g. `"c1"`
 //! - multiple_select: an array of choice ids, e.g. `["c1","c3"]` (stored sorted, de-duplicated)
 //! - identification: free text string
+//!
 //! An empty string / empty array means "cleared" and is stored but never earns points.
 //!
 //! Rules: single-answer types are all-or-nothing; multiple_select is all-or-nothing too

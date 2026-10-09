@@ -6,3 +6,4 @@ src-tauri/gen/schemas
 .DS_Store
 *.db
 *.db-journal
+e2e-failure.png
